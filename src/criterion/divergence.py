@@ -9,9 +9,8 @@ def kl_divergence(input, target, eps=EPS):
     Returns:
         loss (...)
     """
-    _input, _target = input.copy(), target.copy()
-    _input[_input < eps] = eps
-    _target[_target < eps] = eps
+    _input = input + eps
+    _target = target + eps
 
     ratio = _target / _input
     loss = _target * np.log(ratio)
@@ -24,9 +23,8 @@ def is_divergence(input, target, eps=EPS):
     Args:
         input (...)
     """
-    _input, _target = input.copy(), target.copy()
-    _input[_input < eps] = eps
-    _target[_target < eps] = eps
+    _input = input + eps
+    _target = target + eps
 
     ratio = _target / _input
     loss = ratio - np.log(ratio) - 1
@@ -38,9 +36,8 @@ def generalized_kl_divergence(input, target, eps=EPS):
     Args:
         input (...)
     """
-    _input, _target = input.copy(), target.copy()
-    _input[_input < eps] = eps
-    _target[_target < eps] = eps
+    _input = input + eps
+    _target = target + eps
 
     ratio = _target / _input
     loss = _target * np.log(ratio) + _input - _target
