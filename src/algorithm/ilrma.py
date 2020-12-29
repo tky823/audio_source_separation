@@ -107,49 +107,60 @@ class GaussILRMA(ILRMAbase):
         estimation = self.separate(X, demix_filter=W)
         target = np.abs(estimation)**2
 
-        # Update bases
         T, V = self.base, self.activation
+
+        # Update bases
         V_transpose = V.transpose(0,2,1)
         TV = T @ V
         TV[TV < eps] = eps
         division, TV_inverse = target / TV**2, 1 / TV
         TVV = TV_inverse @ V_transpose
         TVV[TVV < eps] = eps
-        self.base = T * np.sqrt(division @ V_transpose / TVV)
+        T = T * np.sqrt(division @ V_transpose / TVV)
+        T[T < eps] = eps
 
         # Update activations
-        T, V = self.base, self.activation
         T_transpose = T.transpose(0,2,1)
         TV = T @ V
         TV[TV < eps] = eps
         division, TV_inverse = target / (TV**2), 1 / TV
         TTV = T_transpose @ TV_inverse
         TTV[TTV < eps] = eps
-        self.activation = V * np.sqrt(T_transpose @ division / TTV)
+        V = V * np.sqrt(T_transpose @ division / TTV)
+        V[V < eps] = eps
+
+        norm = T.sum(axis=1, keepdims=True) # (n_channels, 1, n_bases)
+        self.bases = T / norm
+        self.activation = V * norm.transpose(0,2,1)
     
     def update_space_model(self):
         n_sources = self.n_sources
+        n_bins = self.n_bins
         eps = self.eps
 
         X, W = self.input, self.demix_filter
 
         TV = self.base @ self.activation
         R = TV[:, np.newaxis, np.newaxis, :, :] # (N, 1, 1, I, J) power domain
+        R[R < eps] = eps
         U = np.einsum('nij,mij->nmij', X, X.conj()) / (R + eps)
         U = U.mean(axis=4) # (N, M, M, I)
         
         for source_idx in range(n_sources):
-            # W (I, N, M) U (N, M, M, I)
-            U_n = U[source_idx].transpose(2,0,1) # (I, M, M)
-            WU = W @ U_n # (I, N, M)
-            WU_inverse = np.linalg.inv(WU) # (I, M, N)
-            w = WU_inverse[...,source_idx] # (I, M)
-            w = w[...,np.newaxis] # (I, M, 1)
-            w_Hermite = w.transpose(0,2,1).conj() # (I, 1, M)
-            wUw = w_Hermite @ U_n @ w # (I, 1, 1)
-            w = w / np.sqrt(wUw)
-            w = w.squeeze() # (I, M)
-            W[:, source_idx, :] = w.conj()
+            for bin_idx in range(n_bins):
+                # W (I, N, M) U (N, M, M, I)
+                U_in = U[source_idx,:,:,bin_idx] # (M, M)
+                W_i = W[bin_idx] # (N, M)
+                WU = W_i @ U_in # (N, M)
+                
+                WU_inverse = np.linalg.inv(WU) # (M, N)
+                w = WU_inverse[source_idx] # (M,)
+                w = w[...,np.newaxis] # (M, 1)
+                w_Hermite = w.transpose(1,0).conj() # (1, M)
+                wUw = w_Hermite @ U_in @ w # (1, 1)
+                w = w / np.sqrt(wUw)
+                w = w.squeeze() # (M,)
+                W[bin_idx, source_idx, :] = w.conj()
 
         self.demix_filter = W
 
@@ -195,15 +206,17 @@ def _test():
     
     # STFT
     fft_size, hop_size = 2048, 1024
-    n_bases = 6
-    n_channels = len(titles)
-    iteration = 100
-
+    
     mixture = []
     for _mixed_signal in mixed_signal:
         _mixture = stft(_mixed_signal, fft_size=fft_size, hop_size=hop_size)
         mixture.append(_mixture)
     mixture = np.array(mixture)
+
+    # ILRMA
+    n_bases = 10
+    n_channels = len(titles)
+    iteration = 100
 
     gauss_ilrma = GaussILRMA(n_bases=n_bases)
     estimation = gauss_ilrma(mixture, iteration=iteration)
