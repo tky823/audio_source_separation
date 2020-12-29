@@ -51,23 +51,25 @@ class EUCNMF(NMFbase):
         target = self.target
         eps = self.eps
 
-        # Update bases
         T, V = self.base, self.activation
+
+        # Update bases
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         TVV = TV @ V_transpose
         TVV[TVV < eps] = eps
-        self.base = T * (target @ V_transpose / TVV)
+        T = T * (target @ V_transpose / TVV)
 
         # Update activations
-        T, V = self.base, self.activation
         T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         TTV = T_transpose @ TV
         TTV[TTV < eps] = eps
-        self.activation = V * (T_transpose @ target / TTV)
+        V = V * (T_transpose @ target / TTV)
+
+        self.base, self.activation = T, V
 
 class KLNMF(NMFbase):
     def __init__(self, n_bases=2, eps=EPS):
@@ -83,25 +85,27 @@ class KLNMF(NMFbase):
         target = self.target
         eps = self.eps
 
-        # Update bases
         T, V = self.base, self.activation
+
+        # Update bases
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         Vsum = V_transpose.sum(axis=0, keepdims=True)
         Vsum[Vsum < eps] = eps
         division = target / TV
-        self.base = T * (division @ V_transpose / Vsum)
+        T = T * (division @ V_transpose / Vsum)
 
         # Update activations
-        T, V = self.base, self.activation
         T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         Tsum = T_transpose.sum(axis=1, keepdims=True)
         Tsum[Tsum < eps] = eps
         division = target / TV
-        self.activation = V * (T_transpose @ division / Tsum)
+        V = V * (T_transpose @ division / Tsum)
+
+        self.base, self.activation = T, V
 
 class ISNMF(NMFbase):
     def __init__(self, n_bases=2, eps=EPS):
@@ -117,25 +121,27 @@ class ISNMF(NMFbase):
         target = self.target
         eps = self.eps
 
-        # Update bases
         T, V = self.base, self.activation
+
+        # Update bases
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         division, TV_inverse = target / TV**2, 1 / TV
         TVV = TV_inverse @ V_transpose
         TVV[TVV < eps] = eps
-        self.base = T * np.sqrt(division @ V_transpose / TVV)
+        T = T * np.sqrt(division @ V_transpose / TVV)
 
         # Update activations
-        T, V = self.base, self.activation
         T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         division, TV_inverse = target / (TV**2), 1 / TV
         TTV = T_transpose @ TV_inverse
         TTV[TTV < eps] = eps
-        self.activation = V * np.sqrt(T_transpose @ division / TTV)
+        V = V * np.sqrt(T_transpose @ division / TTV)
+
+        self.base, self.activation = T, V
         
 
 def _test(metric='EUC'):
