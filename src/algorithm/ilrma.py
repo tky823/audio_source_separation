@@ -37,16 +37,16 @@ class ILRMAbase:
         self._reset()
 
         for idx in range(iteration):
-            self.update()
+            self.update_once()
         
         output = self.separate(self.input, self.demix_filter)
 
         return output
 
-    def update(self):
+    def update_once(self):
         raise NotImplementedError("Implement 'update' function")
 
-    def projection_back(self, Y, ref):
+    def projection_back(self, Y, reference):
         """
         Args:
             Y: (n_channels, n_bins, n_frames)
@@ -56,7 +56,7 @@ class ILRMAbase:
         """
         n_channels, n_bins, _ = Y.shape
 
-        numerator = np.sum(Y * ref.conj(), axis=2) # (n_channels, n_bins)
+        numerator = np.sum(Y * reference.conj(), axis=2) # (n_channels, n_bins)
         denominator = np.sum(np.abs(Y)**2, axis=2) # (n_channels, n_bins)
         scale = np.ones((n_channels, n_bins), dtype=np.complex128)
         indices = denominator > 0.0
@@ -79,11 +79,79 @@ class ILRMAbase:
         return output
 
 class GaussILRMA(ILRMAbase):
-    def __init__(self, n_bases=10, ref_id=0, eps=EPS):
+    def __init__(self, n_bases=10, reference_id=0, eps=EPS):
         super().__init__(n_bases=n_bases, eps=eps)
 
-    def update(self):
-        pass
+        self.reference_id = reference_id
+
+    def update_once(self):
+        reference_id = self.reference_id
+
+        X = self.input
+
+        self.update_source_model()
+        self.update_space_model()
+
+        W = self.demix_filter
+
+        Y = self.separate(X, demix_filter=W)
+        Z = self.projection_back(Y, reference=X[reference_id])
+
+        self.estimation = Y * Z[...,np.newaxis]
+    
+    def update_source_model(self):
+        eps = self.eps
+
+        X, W = self.input, self.demix_filter
+        
+        estimation = self.separate(X, demix_filter=W)
+        target = np.abs(estimation)**2
+
+        # Update bases
+        T, V = self.base, self.activation
+        V_transpose = V.transpose(0,2,1)
+        TV = T @ V
+        TV[TV < eps] = eps
+        division, TV_inverse = target / TV**2, 1 / TV
+        TVV = TV_inverse @ V_transpose
+        TVV[TVV < eps] = eps
+        self.base = T * np.sqrt(division @ V_transpose / TVV)
+
+        # Update activations
+        T, V = self.base, self.activation
+        T_transpose = T.transpose(0,2,1)
+        TV = T @ V
+        TV[TV < eps] = eps
+        division, TV_inverse = target / (TV**2), 1 / TV
+        TTV = T_transpose @ TV_inverse
+        TTV[TTV < eps] = eps
+        self.activation = V * np.sqrt(T_transpose @ division / TTV)
+    
+    def update_space_model(self):
+        n_sources = self.n_sources
+        eps = self.eps
+
+        X, W = self.input, self.demix_filter
+
+        TV = self.base @ self.activation
+        R = TV[:, np.newaxis, np.newaxis, :, :] # (N, 1, 1, I, J) power domain
+        U = np.einsum('nij,mij->nmij', X, X.conj()) / (R + eps)
+        U = U.mean(axis=4) # (N, M, M, I)
+        
+        for source_idx in range(n_sources):
+            # W (I, N, M) U (N, M, M, I)
+            U_n = U[source_idx].transpose(2,0,1) # (I, M, M)
+            WU = W @ U_n # (I, N, M)
+            WU_inverse = np.linalg.inv(WU) # (I, M, N)
+            w = WU_inverse[...,source_idx] # (I, M)
+            w = w[...,np.newaxis] # (I, M, 1)
+            w_Hermite = w.transpose(0,2,1).conj() # (I, 1, M)
+            wUw = w_Hermite @ U_n @ w # (I, 1, 1)
+            w = w / np.sqrt(wUw)
+            w = w.squeeze() # (I, M)
+            W[:, source_idx, :] = w.conj()
+
+        self.demix_filter = W
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_indices=[0], samples=None):
     mixed_signals = []
