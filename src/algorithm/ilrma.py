@@ -218,7 +218,7 @@ def _test():
 
     for idx in range(n_channels):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/ILRMA/music-16000-estimated-iter{}-{}.wav".format(iteration, idx), signal=_estimated_signal, sr=16000)
+        write_wav("data/ILRMA/mixture-16000_estimated-iter{}-{}.wav".format(iteration, idx), signal=_estimated_signal, sr=16000)
 
 def _test_conv():
     reverb = 0.16
