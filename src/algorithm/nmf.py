@@ -53,7 +53,7 @@ class EUCNMF(NMFbase):
 
         # Update bases
         T, V = self.base, self.activation
-        T_transpose, V_transpose = T.transpose(1,0), V.transpose(1,0)
+        V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         TVV = TV @ V_transpose
@@ -62,7 +62,7 @@ class EUCNMF(NMFbase):
 
         # Update activations
         T, V = self.base, self.activation
-        T_transpose, V_transpose = T.transpose(1,0), V.transpose(1,0)
+        T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         TTV = T_transpose @ TV
@@ -119,7 +119,7 @@ class ISNMF(NMFbase):
 
         # Update bases
         T, V = self.base, self.activation
-        T_transpose, V_transpose = T.transpose(1,0), V.transpose(1,0)
+        V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         division, TV_inverse = target / TV**2, 1 / TV
@@ -129,7 +129,7 @@ class ISNMF(NMFbase):
 
         # Update activations
         T, V = self.base, self.activation
-        T_transpose, V_transpose = T.transpose(1,0), V.transpose(1,0)
+        T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         division, TV_inverse = target / (TV**2), 1 / TV
