@@ -156,7 +156,7 @@ def projection_back(Y, reference):
     """
     Args:
         Y: (n_channels, n_bins, n_frames)
-        ref: (n_bins, n_frames)
+        reference: (n_bins, n_frames)
     Returns:
         scale: (n_channels, n_bins)
     """
@@ -171,7 +171,9 @@ def projection_back(Y, reference):
     return scale
 
 
-def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_indices=[0], samples=None):
+def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
+    intervals = '-'.join([str(interval) for interval in mic_intervals])
+
     mixed_signals = []
 
     for mic_idx in mic_indices:
@@ -179,7 +181,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_indices=[0], samples=N
         for title_idx in range(len(titles)):
             degree = degrees[title_idx]
             title = titles[title_idx]
-            rir_path = "data/MIRD/Reverb{:.3f}_8-8-8-8-8-8-8/Impulse_response_Acoustic_Lab_Bar-Ilan_University_(Reverberation_{:.3f}s)_8-8-8-8-8-8-8_1m_{:03d}.mat".format(reverb, reverb, degree)
+            rir_path = "data/MIRD/Reverb{:.3f}_{}/Impulse_response_Acoustic_Lab_Bar-Ilan_University_(Reverberation_{:.3f}s)_{}_1m_{:03d}.mat".format(reverb, intervals, reverb, intervals, degree)
             rir_mat = loadmat(rir_path)
 
             rir = rir_mat['impulse_response']
@@ -203,11 +205,12 @@ def _test():
     reverb = 0.16
     duration = 0.5
     samples = int(duration * 16000)
+    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
     mic_indices = [2, 5]
     degrees = [60, 300]
     titles = ['man-16000', 'woman-16000']
 
-    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
+    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
 
     n_sources, T = mixed_signal.shape
     
@@ -223,7 +226,7 @@ def _test():
     # ILRMA
     n_bases = 10
     n_channels = len(titles)
-    iteration = 100
+    iteration = 200
 
     gauss_ilrma = GaussILRMA(n_bases=n_bases)
     estimation = gauss_ilrma(mixture, iteration=iteration)
@@ -265,6 +268,11 @@ if __name__ == '__main__':
 
     os.makedirs("data/multi-channel", exist_ok=True)
     os.makedirs("data/ILRMA", exist_ok=True)
+
+    """
+    Use multichannel room impulse response database.
+    Download database from "https://www.iks.rwth-aachen.de/en/research/tools-downloads/databases/multi-channel-impulse-response-database/"
+    """
 
     # _test_conv()
     _test()
