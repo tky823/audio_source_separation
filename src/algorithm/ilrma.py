@@ -15,15 +15,18 @@ class ILRMAbase:
         n_bases = self.n_bases
         eps = self.eps 
 
-        n_channels, n_bins, n_frames = self.input.shape
+        X = self.input
+
+        n_channels, n_bins, n_frames = X.shape
 
         self.n_channels, self.n_sources = n_channels, n_channels # n_channels == n_sources
         self.n_bins, self.n_frames = n_bins, n_frames
 
-        demix_filter = np.eye(n_channels, dtype=np.complex128)
-        self.demix_filter = np.tile(demix_filter, reps=(n_bins, 1, 1))
+        W = np.eye(n_channels, dtype=np.complex128)
+        self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
         self.base = np.random.rand(n_channels, n_bins, n_bases)
         self.activation = np.random.rand(n_channels, n_bases, n_frames)
+        self.estimation = self.separate(X, demix_filter=W)
         
     def __call__(self, input, iteration=100):
         """
@@ -39,30 +42,13 @@ class ILRMAbase:
         for idx in range(iteration):
             self.update_once()
         
-        output = self.separate(self.input, self.demix_filter)
+        X, W = input, self.demix_filter
+        output = self.separate(X, demix_filter=W)
 
         return output
 
     def update_once(self):
         raise NotImplementedError("Implement 'update' function")
-
-    def projection_back(self, Y, reference):
-        """
-        Args:
-            Y: (n_channels, n_bins, n_frames)
-            ref: (n_bins, n_frames)
-        Returns:
-            scale: (n_channels, n_bins)
-        """
-        n_channels, n_bins, _ = Y.shape
-
-        numerator = np.sum(Y * reference.conj(), axis=2) # (n_channels, n_bins)
-        denominator = np.sum(np.abs(Y)**2, axis=2) # (n_channels, n_bins)
-        scale = np.ones((n_channels, n_bins), dtype=np.complex128)
-        indices = denominator > 0.0
-        scale[indices] = numerator[indices] / denominator[indices]
-
-        return scale
     
     def separate(self, input, demix_filter):
         """
@@ -93,19 +79,25 @@ class GaussILRMA(ILRMAbase):
         self.update_space_model()
 
         W = self.demix_filter
-
         Y = self.separate(X, demix_filter=W)
-        Z = self.projection_back(Y, reference=X[reference_id])
+        
+        scale = projection_back(Y, reference=X[self.reference_id])
 
-        self.estimation = Y * Z[...,np.newaxis]
+        Y_hat = Y * scale[...,np.newaxis].conj() # (N, I, J)
+
+        _Y_hat = Y_hat.transpose(1,0,2) # (I, N, J)
+        _X = X.transpose(1,0,2) # (I, M, J)
+        X_Hermite = X.transpose(1,2,0).conj() # (I, J, M)
+        XX_inverse = np.linalg.inv(_X @ X_Hermite)
+        self.demix_filter = _Y_hat @ X_Hermite @ XX_inverse
+        self.estimation = Y_hat
     
     def update_source_model(self):
         eps = self.eps
 
         X, W = self.input, self.demix_filter
-        
         estimation = self.separate(X, demix_filter=W)
-        target = np.abs(estimation)**2
+        P = np.abs(estimation)**2
 
         T, V = self.base, self.activation
 
@@ -113,7 +105,7 @@ class GaussILRMA(ILRMAbase):
         V_transpose = V.transpose(0,2,1)
         TV = T @ V
         TV[TV < eps] = eps
-        division, TV_inverse = target / TV**2, 1 / TV
+        division, TV_inverse = P / TV**2, 1 / TV
         TVV = TV_inverse @ V_transpose
         TVV[TVV < eps] = eps
         T = T * np.sqrt(division @ V_transpose / TVV)
@@ -123,46 +115,61 @@ class GaussILRMA(ILRMAbase):
         T_transpose = T.transpose(0,2,1)
         TV = T @ V
         TV[TV < eps] = eps
-        division, TV_inverse = target / (TV**2), 1 / TV
+        division, TV_inverse = P / (TV**2), 1 / TV
         TTV = T_transpose @ TV_inverse
         TTV[TTV < eps] = eps
         V = V * np.sqrt(T_transpose @ division / TTV)
         V[V < eps] = eps
 
-        norm = T.sum(axis=1, keepdims=True) # (n_channels, 1, n_bases)
-        self.bases = T / norm
-        self.activation = V * norm.transpose(0,2,1)
-    
+        self.bases, self.activation = T, V
+
     def update_space_model(self):
         n_sources = self.n_sources
         n_bins = self.n_bins
         eps = self.eps
 
         X, W = self.input, self.demix_filter
-
         TV = self.base @ self.activation
-        R = TV[:, np.newaxis, np.newaxis, :, :] # (N, 1, 1, I, J) power domain
-        R[R < eps] = eps
-        U = np.einsum('nij,mij->nmij', X, X.conj()) / (R + eps)
-        U = U.mean(axis=4) # (N, M, M, I)
         
+        X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
+        X = X[...,np.newaxis]
+        X_Hermite = X.transpose(0,1,3,2).conj()
+        XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+        R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+        U = XX / R
+        U = U.mean(axis=2) # (N, n_bins, n_channels, n_channels)
+
         for source_idx in range(n_sources):
-            for bin_idx in range(n_bins):
-                # W (I, N, M) U (N, M, M, I)
-                U_in = U[source_idx,:,:,bin_idx] # (M, M)
-                W_i = W[bin_idx] # (N, M)
-                WU = W_i @ U_in # (N, M)
-                
-                WU_inverse = np.linalg.inv(WU) # (M, N)
-                w = WU_inverse[source_idx] # (M,)
-                w = w[...,np.newaxis] # (M, 1)
-                w_Hermite = w.transpose(1,0).conj() # (1, M)
-                wUw = w_Hermite @ U_in @ w # (1, 1)
-                w = w / np.sqrt(wUw)
-                w = w.squeeze() # (M,)
-                W[bin_idx, source_idx, :] = w.conj()
+            # W: (n_bins, N, n_channels), U: (N, n_bins, n_channels, n_channels)
+            U_n = U[source_idx] # (n_bins, n_channels, n_channels)
+            WU = W @ U_n # (n_bins, n_sources, n_channels)
+            # TODO: condition number
+            WU_inverse = np.linalg.inv(WU)[...,source_idx] # (n_bins, n_sources, n_channels)
+            w = WU_inverse.conj() # (n_bins, n_channels)
+            wUw = w[:, np.newaxis, :] @ U_n @ w[:, :, np.newaxis].conj()
+            denominator = np.sqrt(wUw[...,0])
+            W[:, source_idx, :] = w / denominator
 
         self.demix_filter = W
+
+def projection_back(Y, reference):
+    """
+    Args:
+        Y: (n_channels, n_bins, n_frames)
+        ref: (n_bins, n_frames)
+    Returns:
+        scale: (n_channels, n_bins)
+    """
+    n_channels, n_bins, _ = Y.shape
+
+    numerator = np.sum(Y * reference.conj(), axis=2) # (n_channels, n_bins)
+    denominator = np.sum(np.abs(Y)**2, axis=2) # (n_channels, n_bins)
+    scale = np.ones((n_channels, n_bins), dtype=np.complex128)
+    indices = denominator > 0.0
+    scale[indices] = numerator[indices] / denominator[indices]
+
+    return scale
+
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_indices=[0], samples=None):
     mixed_signals = []
