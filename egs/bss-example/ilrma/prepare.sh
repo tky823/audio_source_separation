@@ -6,8 +6,9 @@ reverb=0.160
 mic_intervals='3-3-3-8-3-3-3'
 
 mkdir -p "data"
-wget "https://soundeffect-lab.info/sound/voice/mp3//game/wizard-greeting1.mp3" -O "data/man-44100.mp3"
-wget "https://soundeffect-lab.info/sound/voice/mp3//game/swordwoman-win1.mp3" -O "data/woman-44100.mp3"
+wget "https://soundeffect-lab.info/sound/voice/mp3//game/wizard-greeting1.mp3" -O "data/wizard-44100.mp3"
+wget "https://soundeffect-lab.info/sound/voice/mp3//game/swordwoman-win1.mp3" -O "data/swordwoman-44100.mp3"
+wget "https://soundeffect-lab.info/sound/voice/mp3//game/thief-boy-greeting1.mp3" -O "data/thief-boy-44100.mp3"
 
 mkdir -p "data/MIRD/Reverb${reverb}_${mic_intervals}"
 url="https://www.iks.rwth-aachen.de/fileadmin/user_upload/downloads/forschung/tools-downloads/Impulse_response_Acoustic_Lab_Bar-Ilan_University__Reverberation_${reverb}s__${mic_intervals}.zip"

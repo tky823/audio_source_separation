@@ -6,7 +6,7 @@ from scipy.io import loadmat
 import librosa
 
 def main():
-    titles = ['man', 'woman']
+    titles = ['wizard', 'swordwoman', 'thief-boy']
     target_sr = 16000
     T_min = None
 
@@ -28,8 +28,8 @@ def main():
     duration = 0.5
     samples = int(duration * target_sr)
     mic_intervals = "3-3-3-8-3-3-3"
-    mic_indices = [3, 4]
-    degrees = [60, 300]
+    mic_indices = list(range(8))
+    degrees = [60, 300, 330]
     
     for mic_idx in mic_indices:
         convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_idx=mic_idx, sr=target_sr, samples=samples)
