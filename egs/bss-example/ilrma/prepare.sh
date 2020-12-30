@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export PYTHONPATH="./local:$PYTHONPATH"
+export PATH="./local:$PATH"
 
 mkdir "data"
 wget "https://soundeffect-lab.info/sound/voice/mp3//game/wizard-greeting1.mp3" -O "data/man-44100.mp3"
