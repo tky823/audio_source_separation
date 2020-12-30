@@ -3,23 +3,25 @@ import numpy as np
 EPS=1e-12
 
 class ILRMAbase:
-    def __init__(self, n_bases=10, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, eps=EPS):
         self.input = None
         self.n_bases = n_bases
 
+        self.partitioning = partitioning
+        self.normalize = normalize
         self.eps = eps
     
     def _reset(self):
         assert self.input is not None, "Specify data!"
 
         n_bases = self.n_bases
-        eps = self.eps 
 
         X = self.input
 
         n_channels, n_bins, n_frames = X.shape
+        n_sources = n_channels # n_channels == n_sources
 
-        self.n_channels, self.n_sources = n_channels, n_channels # n_channels == n_sources
+        self.n_sources, self.n_channels = n_sources, n_channels
         self.n_bins, self.n_frames = n_bins, n_frames
 
         W = np.eye(n_channels, dtype=np.complex128)
@@ -27,6 +29,9 @@ class ILRMAbase:
         self.base = np.random.rand(n_channels, n_bins, n_bases)
         self.activation = np.random.rand(n_channels, n_bases, n_frames)
         self.estimation = self.separate(X, demix_filter=W)
+
+        if self.partitioning:
+            self.latent = np.ones(n_sources, n_bases) / n_sources
         
     def __call__(self, input, iteration=100):
         """
@@ -65,8 +70,8 @@ class ILRMAbase:
         return output
 
 class GaussILRMA(ILRMAbase):
-    def __init__(self, n_bases=10, reference_id=0, eps=EPS):
-        super().__init__(n_bases=n_bases, eps=eps)
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, eps=EPS):
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, eps=eps)
 
         self.reference_id = reference_id
 
@@ -80,6 +85,21 @@ class GaussILRMA(ILRMAbase):
 
         W = self.demix_filter
         Y = self.separate(X, demix_filter=W)
+
+        T = self.base
+        P = np.abs(Y)**2
+        
+        """
+        if self.normalize:
+            aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
+            W = W / aux[np.newaxis,:,np.newaxis]
+            Y = Y / aux[:,np.newaxis,np.newaxis]
+            if self.partitioning:
+                pass
+            else:
+                pass
+                # self.base = T / aux[:,np.newaxis,np.newaxis]**2
+        """
         
         scale = projection_back(Y, reference=X[self.reference_id])
 
@@ -100,6 +120,11 @@ class GaussILRMA(ILRMAbase):
         P = np.abs(estimation)**2
 
         T, V = self.base, self.activation
+
+        if self.partitioning:
+            Z = self.latent
+
+            raise NotImplementedError("Not support for partitioning function.")
 
         # Update bases
         V_transpose = V.transpose(0,2,1)
@@ -137,10 +162,10 @@ class GaussILRMA(ILRMAbase):
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
         R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
         U = XX / R
-        U = U.mean(axis=2) # (N, n_bins, n_channels, n_channels)
+        U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
 
         for source_idx in range(n_sources):
-            # W: (n_bins, N, n_channels), U: (N, n_bins, n_channels, n_channels)
+            # W: (n_bins, n_sources, n_channels), U: (N, n_bins, n_channels, n_channels)
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
             # TODO: condition number
