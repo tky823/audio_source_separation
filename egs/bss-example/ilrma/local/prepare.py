@@ -18,15 +18,15 @@ def main():
     reverb = 0.16
     duration = 0.5
     samples = int(duration * target_sr)
-    mic_intervals = "8-8-8-3-8-8-8"
-    mic_indices = [2, 5]
+    mic_intervals = "3-3-3-8-3-3-3"
+    mic_indices = [3, 4]
     degrees = [60, 300]
     
     for mic_idx in mic_indices:
         convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_idx=mic_idx, samples=samples)
 
 
-def convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals="8-8-8-3-8-8-8", mic_idx=0, sr=16000, samples=None):
+def convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals="3-3-3-8-3-3-3", mic_idx=0, sr=16000, samples=None):
     for title_idx in range(len(titles)):
         degree = degrees[title_idx]
         title = titles[title_idx]
