@@ -8,11 +8,20 @@ import librosa
 def main():
     titles = ['man', 'woman']
     target_sr = 16000
+    T_min = None
 
     # Resample
     for title in titles:
         source, sr = librosa.load("./data/{}-44100.mp3".format(title), target_sr)
-        librosa.output.write_wav("./data/{}-16000.wav".format(title), source, target_sr)
+        T = len(source)
+        librosa.output.write_wav("./data/{}-{}.wav".format(title, target_sr), source, target_sr)
+
+        if T_min is None or T < T_min:
+            T_min = T
+    
+    for title in titles:
+        source, sr = librosa.load("./data/{}-44100.mp3".format(title), target_sr)
+        librosa.output.write_wav("./data/{}-{}.wav".format(title, target_sr), source[:T_min], target_sr)
 
     # Room impulse response
     reverb = 0.16
@@ -42,13 +51,6 @@ def convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals="3-3-3-8-3-3-
         convolved_signals = np.convolve(source, rir[:, mic_idx])
 
         librosa.output.write_wav("./data/{}-{}_convolved_deg{}-mic{}.wav".format(title, sr, degree, mic_idx), convolved_signals, sr)
-    
-
-def _test():
-    np.random.seed(111)
-    
-    
-    
     
 if __name__ == '__main__':
     main()
