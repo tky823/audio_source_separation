@@ -23,7 +23,7 @@ def main():
     degrees = [60, 300]
     
     for mic_idx in mic_indices:
-        convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_idx=mic_idx, samples=samples)
+        convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_idx=mic_idx, sr=target_sr, samples=samples)
 
 
 def convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals="3-3-3-8-3-3-3", mic_idx=0, sr=16000, samples=None):
@@ -38,7 +38,7 @@ def convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals="3-3-3-8-3-3-
         if samples is not None:
             rir = rir[:samples]
 
-        source, sr = librosa.load("data/{}-{}.wav".format(title, sr))
+        source, sr = librosa.load("data/{}-{}.wav".format(title, sr), sr)
         convolved_signals = np.convolve(source, rir[:, mic_idx])
 
         librosa.output.write_wav("./data/{}-{}_convolved_deg{}-mic{}.wav".format(title, sr, degree, mic_idx), convolved_signals, sr)
