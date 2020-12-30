@@ -12,7 +12,7 @@ wget "https://soundeffect-lab.info/sound/voice/mp3//game/swordwoman-win1.mp3" -O
 mkdir -p "data/MIRD/Reverb${reverb}_${mic_intervals}"
 url="https://www.iks.rwth-aachen.de/fileadmin/user_upload/downloads/forschung/tools-downloads/Impulse_response_Acoustic_Lab_Bar-Ilan_University__Reverberation_${reverb}s__${mic_intervals}.zip"
 mkdir -p "data/MIRD/Reverb${reverb}_${mic_intervals}"
-wget ${url} -O "data/MIRD/Reverb${reverb}_${mic_intervals}/mird.zip"
+wget ${url} -O "data/MIRD/mird.zip"
 unzip "data/MIRD/mird.zip" -d "data/MIRD/Reverb${reverb}_${mic_intervals}" 
 
 prepare.py
