@@ -18,7 +18,7 @@ def main():
     reverb = 0.16
     duration = 0.5
     samples = int(duration * target_sr)
-    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
+    mic_intervals = "8-8-8-3-8-8-8"
     mic_indices = [2, 5]
     degrees = [60, 300]
     
