@@ -38,7 +38,7 @@ def convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals="3-3-3-8-3-3-
         if samples is not None:
             rir = rir[:samples]
 
-        source, sr = librosa.load("data/{}.wav".format(title))
+        source, sr = librosa.load("data/{}-{}.wav".format(title, sr))
         convolved_signals = np.convolve(source, rir[:, mic_idx])
 
         librosa.output.write_wav("./data/{}-{}_convolved_deg{}-mic{}.wav".format(title, sr, degree, mic_idx), convolved_signals, sr)
