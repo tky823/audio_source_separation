@@ -10,7 +10,7 @@ def main():
 
     for title in titles:
         source, sr = librosa.load("./data/{}-44100.mp3".format(title), target_sr)
-        librosa.write_wav("./data/{}-16000.wav".format(title), source, target_sr)
+        librosa.output.write_wav("./data/{}-16000.wav".format(title), source, target_sr)
     
 if __name__ == '__main__':
     main()
