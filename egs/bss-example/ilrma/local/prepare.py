@@ -27,12 +27,10 @@ def main():
 
 
 def convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals="8-8-8-3-8-8-8", mic_idx=0, sr=16000, samples=None):
-    intervals = '-'.join([str(interval) for interval in mic_intervals])
-    
     for title_idx in range(len(titles)):
         degree = degrees[title_idx]
         title = titles[title_idx]
-        rir_path = "data/MIRD/Reverb{:.3f}_{}/Impulse_response_Acoustic_Lab_Bar-Ilan_University_(Reverberation_{:.3f}s)_{}_1m_{:03d}.mat".format(reverb, intervals, reverb, intervals, degree)
+        rir_path = "data/MIRD/Reverb{:.3f}_{}/Impulse_response_Acoustic_Lab_Bar-Ilan_University_(Reverberation_{:.3f}s)_{}_1m_{:03d}.mat".format(reverb, mic_intervals, reverb, mic_intervals, degree)
         rir_mat = loadmat(rir_path)
 
         rir = rir_mat['impulse_response']
