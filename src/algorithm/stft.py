@@ -12,7 +12,7 @@ def istft(input, fft_size, hop_size=None, window_fn='hann', normalize=False, len
     t, output = ss.istft(input, nperseg=fft_size, noverlap=fft_size-hop_size, window=window)
 
     if length is not None:
-        output = output[:length]
+        output = output[...,:length]
     
     return output
     
