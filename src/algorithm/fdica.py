@@ -116,12 +116,31 @@ class NaturalGradFDICA(FDICAbase):
 
         self._reset()
 
+        loss = self.compute_negative_loglikelihood()
+        self.loss.append(loss)
+
         for idx in range(iteration):
             self.update_once()
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
         
+        X, W = input, self.demix_filter
+        self.estimation = self.separate(X, demix_filter=W)
+
         self.solve_permutation()
+
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[0])
+        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
+
+        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
+        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
+        XX_inverse = np.linalg.inv(X @ X_Hermite)
+        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
+        self.estimation = Y_hat.transpose(1,0,2)
 
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
@@ -132,7 +151,7 @@ class NaturalGradFDICA(FDICAbase):
         Y = self.estimation
         W = self.demix_filter
 
-        loss = 2 * np.abs(Y).sum(axis=2).mean(axis=0) - 2 * np.log(np.abs(np.linalg.det(W)))
+        loss = 2 * np.abs(Y).sum(axis=0).mean(axis=1) - 2 * np.log(np.abs(np.linalg.det(W)))
         loss = loss.sum()
 
         return loss
@@ -150,18 +169,6 @@ class NaturalGradFDICA(FDICAbase):
         Y = self.separate(X, demix_filter=W)
 
         self.estimation = Y
-        
-        """
-        scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
-
-        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
-        XX_inverse = np.linalg.inv(X @ X_Hermite)
-        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-        self.estimation = Y_hat.transpose(1,0,2)
-        """
 
     def update_laplace(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -174,10 +181,6 @@ class NaturalGradFDICA(FDICAbase):
         Y = self.separate(X, demix_filter=W)
         eye = np.eye(n_sources, n_channels, dtype=np.complex128)
 
-        print(Y)
-        print(Y.shape)
-        exit()
-        
         Y = Y.transpose(1,0,2) # (n_bins, n_sources, n_frames)
         Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
         denominator = np.abs(Y)
@@ -207,13 +210,13 @@ class NaturalGradFDICA(FDICAbase):
 
         min_idx = indices[0]
         P_criteria = P[min_idx] # (n_sources, n_frames)
-        
+
         for idx in range(1, n_bins):
             min_idx = indices[idx]
             P_max = None
             perm_max = None
             for perm in permutations:
-                P_perm = np.sum(P_criteria @ P[min_idx, perm,:].transpose(1,0))
+                P_perm = np.sum(P_criteria * P[min_idx, perm,:])
                 if P_max is None or P_perm > P_max:
                     P_max = P_perm
                     perm_max = perm
@@ -278,7 +281,7 @@ def _test():
     n_channels, T = mixed_signal.shape
     
     # STFT
-    fft_size, hop_size = 2048, 1024
+    fft_size, hop_size = 4096, 2048
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # FDICA
