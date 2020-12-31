@@ -244,12 +244,7 @@ def _test():
     
     # STFT
     fft_size, hop_size = 2048, 1024
-    
-    mixture = []
-    for _mixed_signal in mixed_signal:
-        _mixture = stft(_mixed_signal, fft_size=fft_size, hop_size=hop_size)
-        mixture.append(_mixture)
-    mixture = np.array(mixture)
+    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # ILRMA
     n_bases = 10
@@ -259,11 +254,7 @@ def _test():
     gauss_ilrma = GaussILRMA(n_bases=n_bases)
     estimation = gauss_ilrma(mixture, iteration=iteration)
 
-    estimated_signal = []
-    for _estimation in estimation:
-        _estimated_signal = istft(_estimation, fft_size=fft_size, hop_size=hop_size, length=T)
-        estimated_signal.append(_estimated_signal)
-    estimated_signal = np.array(estimated_signal)
+    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
     
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
