@@ -127,12 +127,12 @@ class GaussILRMA(ILRMAbase):
         Y_hat = self.projection_back(Y, demix_filter=W, reference_id=reference_id)
         """
 
-        _Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        _X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(1,2,0).conj() # (n_bins, n_frames, n_sources)
-        XX_inverse = np.linalg.inv(_X @ X_Hermite)
-        self.demix_filter = _Y_hat @ X_Hermite @ XX_inverse
-        self.estimation = Y_hat
+        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
+        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
+        XX_inverse = np.linalg.inv(X @ X_Hermite)
+        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
+        self.estimation = Y_hat.transpose(1,0,2)
     
     def update_source_model(self):
         eps = self.eps
