@@ -2,14 +2,14 @@ import numpy as np
 from scipy import signal as ss
 
 def stft(input, fft_size, hop_size=None, window_fn='hann', normalize=False):
-    window = build_window(fft_size, window_fn=window_fn) # (fft_size,)
-    f, t, output = ss.stft(input, nperseg=fft_size, noverlap=fft_size-hop_size, window=window)
+    # window = build_window(fft_size, window_fn=window_fn) # (fft_size,)
+    f, t, output = ss.stft(input, nperseg=fft_size, noverlap=fft_size-hop_size, window=window_fn)
     
     return output
 
 def istft(input, fft_size, hop_size=None, window_fn='hann', normalize=False, length=None):
-    window = build_window(fft_size, window_fn=window_fn) # (fft_size,)
-    t, output = ss.istft(input, nperseg=fft_size, noverlap=fft_size-hop_size, window=window)
+    # window = build_window(fft_size, window_fn=window_fn) # (fft_size,)
+    t, output = ss.istft(input, nperseg=fft_size, noverlap=fft_size-hop_size, window=window_fn)
 
     if length is not None:
         output = output[...,:length]
