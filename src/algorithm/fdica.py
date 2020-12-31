@@ -41,8 +41,8 @@ class FDICAbase:
         for idx in range(iteration):
             self.update_once()
 
-            #loss = self.criterion(input)
-            #self.loss.append(loss.sum())
+            # loss = self.criterion(input)
+            # self.loss.append(loss.sum())
         
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
@@ -87,6 +87,8 @@ class GradFDICA(FDICAbase):
 
         for idx in range(iteration):
             self.update_once()
+            #loss = self.compute_negative_loglikelihood(estimation)
+            #self.loss.append(loss)
         
         self.solve_permutation()
 
@@ -116,6 +118,8 @@ class NaturalGradFDICA(FDICAbase):
 
         for idx in range(iteration):
             self.update_once()
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
         
         self.solve_permutation()
 
@@ -123,6 +127,15 @@ class NaturalGradFDICA(FDICAbase):
         output = self.separate(X, demix_filter=W)
 
         return output
+    
+    def compute_negative_loglikelihood(self):
+        Y = self.estimation
+        W = self.demix_filter
+
+        loss = 2 * np.abs(Y).sum(axis=2).mean(axis=0) - 2 * np.log(np.abs(np.linalg.det(W)))
+        loss = loss.sum()
+
+        return loss
     
     def update_once(self):
         reference_id = self.reference_id
@@ -137,14 +150,14 @@ class NaturalGradFDICA(FDICAbase):
         Y = self.separate(X, demix_filter=W)
         
         scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (N, I, J)
+        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
 
-        _Y_hat = Y_hat.transpose(1,0,2) # (I, N, J)
-        _X = X.transpose(1,0,2) # (I, M, J)
-        X_Hermite = X.transpose(1,2,0).conj() # (I, J, M)
-        XX_inverse = np.linalg.inv(_X @ X_Hermite)
-        self.demix_filter = _Y_hat @ X_Hermite @ XX_inverse
-        self.estimation = Y_hat
+        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
+        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
+        XX_inverse = np.linalg.inv(X @ X_Hermite)
+        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
+        self.estimation = Y_hat.transpose(1,0,2)
 
     def update_laplace(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -177,7 +190,9 @@ class NaturalGradFDICA(FDICAbase):
         Y = self.estimation # (n_sources, n_bins, n_frames)
 
         P = np.abs(Y).transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        P = P / P.sum(axis=1, keepdims=True) # (n_bins, n_sources, n_frames)
+        norm = np.sqrt(np.sum(P**2, axis=1, keepdims=True))
+        norm[norm < eps] = eps
+        P = P / norm # (n_bins, n_sources, n_frames)
         correlation = np.sum(P @ P.transpose(0,2,1), axis=(1,2)) # (n_sources,)
         indices = np.argsort(correlation)
 
@@ -258,7 +273,7 @@ def _test():
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # FDICA
-    lr = 1e-3
+    lr = 0.1
     n_sources = len(titles)
     iteration = 200
 
@@ -271,7 +286,14 @@ def _test():
 
     for idx in range(n_sources):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/FDICA/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=sr)
+        write_wav("data/FDICA/NaturalGradFDICA/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=sr)
+    
+    plt.figure()
+    plt.plot(fdica.loss, color='black')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.savefig('data/FDICA/NaturalGradFDICA/loss.png', bbox_inches='tight')
+    plt.close()
 
 def _test_conv():
     sr = 16000
@@ -298,7 +320,7 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/FDICA", exist_ok=True)
+    os.makedirs("data/FDICA/NaturalGradFDICA", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
