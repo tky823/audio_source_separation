@@ -62,7 +62,36 @@ class FDICAbase:
 
         return output
 
-class FDICA(FDICAbase):
+class GradFDICA(FDICAbase):
+    def __init__(self, distr='laplace', lr=1e-3, reference_id=0, eps=EPS):
+        super().__init__(eps=eps)
+
+        self.distr = distr
+        self.lr = lr
+        self.reference_id = reference_id
+    
+    def __call__(self, input, iteration=100):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset()
+
+        for idx in range(iteration):
+            self.update_once()
+        
+        self.solve_permutation()
+
+        X, W = input, self.demix_filter
+        output = self.separate(X, demix_filter=W)
+
+        return output
+
+class NaturalGradFDICA(FDICAbase):
     def __init__(self, distr='laplace', lr=1e-3, reference_id=0, eps=EPS):
         super().__init__(eps=eps)
 
@@ -129,8 +158,8 @@ class FDICA(FDICAbase):
         denominator[denominator < eps] = eps
         Phi = Y / denominator # (n_bins, n_sources, n_frames)
 
-        delta = (eye - (Phi @ Y_Hermite) / n_frames) @ W
-        W = W + lr * delta # (n_bins, n_sources, n_channels)
+        delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
+        W = W - lr * delta # (n_bins, n_sources, n_channels)
 
         self.demix_filter = W
     
@@ -206,7 +235,7 @@ def _test():
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
 
-    n_sources, T = mixed_signal.shape
+    n_channels, T = mixed_signal.shape
     
     # STFT
     fft_size, hop_size = 2048, 1024
@@ -214,17 +243,17 @@ def _test():
 
     # FDICA
     lr = 1e-3
-    n_channels = len(titles)
-    iteration = 200
+    n_sources = len(titles)
+    iteration = 1000
 
-    fdica = FDICA(lr=lr)
+    fdica = NaturalGradFDICA(lr=lr)
     estimation = fdica(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
     
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
-    for idx in range(n_channels):
+    for idx in range(n_sources):
         _estimated_signal = estimated_signal[idx]
         write_wav("data/FDICA/mixture-16000_estimated-iter{}-{}.wav".format(iteration, idx), signal=_estimated_signal, sr=16000)
 
