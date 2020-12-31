@@ -94,6 +94,39 @@ class GaussILRMA(ILRMAbase):
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, eps=eps)
 
         self.reference_id = reference_id
+    
+    def __call__(self, input, iteration=100):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset()
+
+        for idx in range(iteration):
+            self.update_once()
+        
+        reference_id = self.reference_id
+        W = self.demix_filter
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
+        
+        scale = projection_back(Y, reference=X[reference_id])
+        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
+        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
+        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
+        XX_inverse = np.linalg.inv(X @ X_Hermite)
+        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
+        
+        X, W = input, self.demix_filter
+        output = self.separate(X, demix_filter=W)
+        self.estimation = output
+
+        return output
 
     def update_once(self):
         reference_id = self.reference_id
@@ -105,7 +138,7 @@ class GaussILRMA(ILRMAbase):
 
         W = self.demix_filter
         Y = self.separate(X, demix_filter=W)
-
+        self.estimation = Y
         """
         if self.normalize:
             T = self.base
@@ -119,20 +152,21 @@ class GaussILRMA(ILRMAbase):
                 pass
                 # self.base = T / aux[:,np.newaxis,np.newaxis]**2
         """
-        
+        """
         scale = projection_back(Y, reference=X[reference_id])
         Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
-        
+        """
         """
         Y_hat = self.projection_back(Y, demix_filter=W, reference_id=reference_id)
         """
-
+        """
         Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
         X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
         X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
         XX_inverse = np.linalg.inv(X @ X_Hermite)
         self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
         self.estimation = Y_hat.transpose(1,0,2)
+        """
     
     def update_source_model(self):
         eps = self.eps
