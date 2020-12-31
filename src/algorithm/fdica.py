@@ -129,7 +129,8 @@ class FDICA(FDICAbase):
         denominator[denominator < eps] = eps
         Phi = Y / denominator # (n_bins, n_sources, n_frames)
 
-        W = W + lr * ((eye - (Phi @ Y_Hermite) / n_frames) @ W) # (n_bins, n_sources, n_channels)
+        delta = (eye - (Phi @ Y_Hermite) / n_frames) @ W
+        W = W + lr * delta # (n_bins, n_sources, n_channels)
 
         self.demix_filter = W
     
@@ -209,26 +210,17 @@ def _test():
     
     # STFT
     fft_size, hop_size = 2048, 1024
-    
-    mixture = []
-    for _mixed_signal in mixed_signal:
-        _mixture = stft(_mixed_signal, fft_size=fft_size, hop_size=hop_size)
-        mixture.append(_mixture)
-    mixture = np.array(mixture)
+    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # FDICA
-    n_bases = 10
+    lr = 1e-3
     n_channels = len(titles)
-    iteration = 1000
+    iteration = 200
 
-    fdica = FDICA()
+    fdica = FDICA(lr=lr)
     estimation = fdica(mixture, iteration=iteration)
 
-    estimated_signal = []
-    for _estimation in estimation:
-        _estimated_signal = istft(_estimation, fft_size=fft_size, hop_size=hop_size, length=T)
-        estimated_signal.append(_estimated_signal)
-    estimated_signal = np.array(estimated_signal)
+    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
     
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
