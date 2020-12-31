@@ -24,8 +24,8 @@ class NMFbase:
         self.target = target
         F_bin, T_bin = target.shape
 
-        self.base = np.random.rand(F_bin, n_bases) + 1
-        self.activation = np.random.rand(n_bases, T_bin) + 1
+        self.base = np.random.rand(F_bin, n_bases)
+        self.activation = np.random.rand(n_bases, T_bin)
 
         for idx in range(iteration):
             self.update_once()
@@ -51,23 +51,25 @@ class EUCNMF(NMFbase):
         target = self.target
         eps = self.eps
 
-        # Update bases
         T, V = self.base, self.activation
-        T_transpose, V_transpose = T.transpose(1,0), V.transpose(1,0)
+
+        # Update bases
+        V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         TVV = TV @ V_transpose
         TVV[TVV < eps] = eps
-        self.base = T * (target @ V_transpose / TVV)
+        T = T * (target @ V_transpose / TVV)
 
         # Update activations
-        T, V = self.base, self.activation
-        T_transpose, V_transpose = T.transpose(1,0), V.transpose(1,0)
+        T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         TTV = T_transpose @ TV
         TTV[TTV < eps] = eps
-        self.activation = V * (T_transpose @ target / TTV)
+        V = V * (T_transpose @ target / TTV)
+
+        self.base, self.activation = T, V
 
 class KLNMF(NMFbase):
     def __init__(self, n_bases=2, eps=EPS):
@@ -83,25 +85,27 @@ class KLNMF(NMFbase):
         target = self.target
         eps = self.eps
 
-        # Update bases
         T, V = self.base, self.activation
+
+        # Update bases
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         Vsum = V_transpose.sum(axis=0, keepdims=True)
         Vsum[Vsum < eps] = eps
         division = target / TV
-        self.base = T * (division @ V_transpose / Vsum)
+        T = T * (division @ V_transpose / Vsum)
 
         # Update activations
-        T, V = self.base, self.activation
         T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         Tsum = T_transpose.sum(axis=1, keepdims=True)
         Tsum[Tsum < eps] = eps
         division = target / TV
-        self.activation = V * (T_transpose @ division / Tsum)
+        V = V * (T_transpose @ division / Tsum)
+
+        self.base, self.activation = T, V
 
 class ISNMF(NMFbase):
     def __init__(self, n_bases=2, eps=EPS):
@@ -117,25 +121,27 @@ class ISNMF(NMFbase):
         target = self.target
         eps = self.eps
 
-        # Update bases
         T, V = self.base, self.activation
-        T_transpose, V_transpose = T.transpose(1,0), V.transpose(1,0)
+
+        # Update bases
+        V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         division, TV_inverse = target / TV**2, 1 / TV
         TVV = TV_inverse @ V_transpose
         TVV[TVV < eps] = eps
-        self.base = T * np.sqrt(division @ V_transpose / TVV)
+        T = T * np.sqrt(division @ V_transpose / TVV)
 
         # Update activations
-        T, V = self.base, self.activation
-        T_transpose, V_transpose = T.transpose(1,0), V.transpose(1,0)
+        T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
         division, TV_inverse = target / (TV**2), 1 / TV
         TTV = T_transpose @ TV_inverse
         TTV[TTV < eps] = eps
-        self.activation = V * np.sqrt(T_transpose @ division / TTV)
+        V = V * np.sqrt(T_transpose @ division / TTV)
+
+        self.base, self.activation = T, V
         
 
 def _test(metric='EUC'):
@@ -145,23 +151,13 @@ def _test(metric='EUC'):
     n_bases = 6
     iteration = 100
     
-    signal, sr = read_wav("data/music-8000.wav")
+    signal, sr = read_wav("data/single-channel/music-8000.wav")
     
     T = len(signal)
 
     spectrogram = stft(signal, fft_size=fft_size, hop_size=hop_size)
     amplitude = np.abs(spectrogram)
     power = amplitude**2
-    amplitude[amplitude < EPS] = EPS
-    power[power < EPS] = EPS
-
-    log_spectrogram = 10 * np.log10(power)
-
-    plt.figure()
-    plt.pcolormesh(log_spectrogram, cmap='jet')
-    plt.colorbar()
-    plt.savefig('data/NMF/spectrogram.png', bbox_inches='tight')
-    plt.close()
 
     if metric == 'EUC':
         nmf = EUCNMF(n_bases)
@@ -172,9 +168,12 @@ def _test(metric='EUC'):
     else:
         raise NotImplementedError("Not support {}-NMF".format(metric))
 
-    nmf.update(amplitude, iteration=iteration)
+    nmf.update(power, iteration=iteration)
 
-    estimated_amplitude = nmf.base @ nmf.activation
+    amplitude[amplitude < EPS] = EPS
+
+    estimated_power = nmf.base @ nmf.activation
+    estimated_amplitude = np.sqrt(estimated_power)
     ratio = estimated_amplitude / amplitude
     estimated_spectrogram = ratio * spectrogram
     
@@ -182,11 +181,18 @@ def _test(metric='EUC'):
     estimated_signal = estimated_signal / np.abs(estimated_signal).max()
     write_wav("data/NMF/{}/music-8000-estimated-iter{}.wav".format(metric, iteration), signal=estimated_signal, sr=8000)
 
-    for idx in range(n_bases):
-        estimated_amplitude = nmf.base[:, idx: idx+1] @ nmf.activation[idx: idx+1, :]
-        estimated_power = estimated_amplitude**2
-        estimated_power[estimated_power < EPS] = EPS
+    power[power < EPS] = EPS
+    log_spectrogram = 10 * np.log10(power)
 
+    plt.figure()
+    plt.pcolormesh(log_spectrogram, cmap='jet')
+    plt.colorbar()
+    plt.savefig('data/NMF/spectrogram.png', bbox_inches='tight')
+    plt.close()
+
+    for idx in range(n_bases):
+        estimated_power = nmf.base[:, idx: idx+1] @ nmf.activation[idx: idx+1, :]
+        estimated_amplitude = np.sqrt(estimated_power)
         ratio = estimated_amplitude / amplitude
         estimated_spectrogram = ratio * spectrogram
 
@@ -194,7 +200,9 @@ def _test(metric='EUC'):
         estimated_signal = estimated_signal / np.abs(estimated_signal).max()
         write_wav("data/NMF/{}/music-8000-estimated-iter{}-base{}.wav".format(metric, iteration, idx), signal=estimated_signal, sr=8000)
 
+        estimated_power[estimated_power < EPS] = EPS
         log_spectrogram = 10 * np.log10(estimated_power)
+
         plt.figure()
         plt.pcolormesh(log_spectrogram, cmap='jet')
         plt.colorbar()
