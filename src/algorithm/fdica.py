@@ -1,4 +1,5 @@
 import numpy as np
+import itertools
 
 from algorithm.projection_back import projection_back
 
@@ -69,6 +70,27 @@ class FDICA(FDICAbase):
         self.lr = lr
         self.reference_id = reference_id
     
+    def __call__(self, input, iteration=100):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset()
+
+        for idx in range(iteration):
+            self.update_once()
+        
+        self.solve_permutation()
+
+        X, W = input, self.demix_filter
+        output = self.separate(X, demix_filter=W)
+
+        return output
+    
     def update_once(self):
         reference_id = self.reference_id
         X = self.input
@@ -93,14 +115,13 @@ class FDICA(FDICAbase):
 
     def update_laplace(self):
         n_sources, n_channels = self.n_sources, self.n_channels
+        n_frames = self.n_frames
         lr = self.lr
         eps = self.eps
 
         W = self.demix_filter
         Y = self.estimation
         eye = np.eye(n_sources, n_channels, dtype=np.complex128)
-
-        _, _, n_frames = Y.shape
         
         Y = Y.transpose(1,0,2) # (n_bins, n_sources, n_frames)
         Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
@@ -111,6 +132,36 @@ class FDICA(FDICAbase):
         W = W + lr * ((eye - (Phi @ Y_Hermite) / n_frames) @ W) # (n_bins, n_sources, n_channels)
 
         self.demix_filter = W
+    
+    def solve_permutation(self):
+        n_bins, n_sources = self.n_bins, self.n_sources
+        permutations = list(itertools.permutations(range(n_sources)))
+
+        W = self.demix_filter # (n_bins, n_sources, n_chennels)
+        Y = self.estimation # (n_sources, n_bins, n_frames)
+
+        P = np.abs(Y).transpose(1,0,2)
+        P = P / P.sum(axis=0) # (n_bins, n_sources, n_frames)
+        correlation = np.sum(P @ P.transpose(0,2,1), axis=(1,2)) # (n_sources,)
+        indices = np.argsort(correlation)
+
+        min_idx = indices[0]
+        P_criteria = P[min_idx] # (n_sources, n_frames)
+        
+        for idx in range(1, n_bins):
+            min_idx = indices[idx]
+            P_max = None
+            perm_max = None
+            for perm in permutations:
+                P_perm = np.sum(P_criteria @ P[min_idx, perm].transpose(1,0))
+                if P_max is None or P_perm > P_max:
+                    P_max = P_perm
+                    perm_max = perm
+            P_criteria = P_criteria + P_max
+            W[min_idx,:,:] = W[min_idx,perm_max,:]
+        
+        self.demix_filter = W
+
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
