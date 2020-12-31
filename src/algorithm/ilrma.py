@@ -70,6 +70,7 @@ class ILRMAbase:
         output = estimation.transpose(1,0,2)
 
         return output
+    
     """
     def projection_back(self, estimation, demix_filter, reference_id=0):
         n_sources = self.n_sources
@@ -126,12 +127,12 @@ class GaussILRMA(ILRMAbase):
         Y_hat = self.projection_back(Y, demix_filter=W, reference_id=reference_id)
         """
 
-        _Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        _X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(1,2,0).conj() # (n_bins, n_frames, n_sources)
-        XX_inverse = np.linalg.inv(_X @ X_Hermite)
-        self.demix_filter = _Y_hat @ X_Hermite @ XX_inverse
-        self.estimation = Y_hat
+        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
+        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
+        XX_inverse = np.linalg.inv(X @ X_Hermite)
+        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
+        self.estimation = Y_hat.transpose(1,0,2)
     
     def update_source_model(self):
         eps = self.eps
@@ -192,7 +193,7 @@ class GaussILRMA(ILRMAbase):
             # TODO: condition number
             WU_inverse = np.linalg.inv(WU)[...,source_idx] # (n_bins, n_sources, n_channels)
             w = WU_inverse.conj() # (n_bins, n_channels)
-            wUw = w[:, np.newaxis, :] @ U_n @ w[:, :, np.newaxis].conj()
+            wUw = w[:, np.newaxis, :].conj() @ U_n @ w[:, :, np.newaxis]
             denominator = np.sqrt(wUw[...,0])
             W[:, source_idx, :] = w / denominator
 
@@ -200,6 +201,14 @@ class GaussILRMA(ILRMAbase):
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
+
+    T_min = None
+
+    for title in titles:
+        source, sr = read_wav("data/single-channel/{}.wav".format(title))
+        T = len(source)
+        if T_min is None or T < T_min:
+            T_min = T
 
     mixed_signals = []
 
@@ -217,7 +226,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
                 rir = rir[:samples]
 
             source, sr = read_wav("data/single-channel/{}.wav".format(title))
-            _mixture = _mixture + np.convolve(source, rir[:, mic_idx])
+            _mixture = _mixture + np.convolve(source[:T_min], rir[:, mic_idx])
         
         mixed_signals.append(_mixture)
     
@@ -229,9 +238,10 @@ def _test():
     np.random.seed(111)
     
     # Room impulse response
+    sr = 16000
     reverb = 0.16
     duration = 0.5
-    samples = int(duration * 16000)
+    samples = int(duration * sr)
     mic_intervals = [8, 8, 8, 8, 8, 8, 8]
     mic_indices = [2, 5]
     degrees = [60, 300]
@@ -243,12 +253,7 @@ def _test():
     
     # STFT
     fft_size, hop_size = 2048, 1024
-    
-    mixture = []
-    for _mixed_signal in mixed_signal:
-        _mixture = stft(_mixed_signal, fft_size=fft_size, hop_size=hop_size)
-        mixture.append(_mixture)
-    mixture = np.array(mixture)
+    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # ILRMA
     n_bases = 10
@@ -258,29 +263,26 @@ def _test():
     gauss_ilrma = GaussILRMA(n_bases=n_bases)
     estimation = gauss_ilrma(mixture, iteration=iteration)
 
-    estimated_signal = []
-    for _estimation in estimation:
-        _estimated_signal = istft(_estimation, fft_size=fft_size, hop_size=hop_size, length=T)
-        estimated_signal.append(_estimated_signal)
-    estimated_signal = np.array(estimated_signal)
+    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
     
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
     for idx in range(n_channels):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/ILRMA/mixture-16000_estimated-iter{}-{}.wav".format(iteration, idx), signal=_estimated_signal, sr=16000)
+        write_wav("data/ILRMA/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=sr)
 
 def _test_conv():
+    sr = 16000
     reverb = 0.16
     duration = 0.5
-    samples = int(duration * 16000)
+    samples = int(duration * sr)
     mic_indices = [2, 5]
     degrees = [60, 300]
     titles = ['man-16000', 'woman-16000']
     
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
 
-    write_wav("data/multi-channel/mixture-16000.wav", mixed_signal.T, sr=16000)
+    write_wav("data/multi-channel/mixture-{}.wav".format(sr), mixed_signal.T, sr=sr)
 
 if __name__ == '__main__':
     import os

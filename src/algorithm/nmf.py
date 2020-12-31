@@ -32,7 +32,7 @@ class NMFbase:
 
             TV = self.base @ self.activation
             loss = self.criterion(TV, target)
-            self.loss.append(loss.sum().item())
+            self.loss.append(loss.sum())
         
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function")
