@@ -8,6 +8,7 @@ EPS=1e-12
 class FDICAbase:
     def __init__(self, eps=EPS):
         self.input = None
+        self.loss = []
 
         self.eps = eps
     
@@ -39,6 +40,9 @@ class FDICAbase:
 
         for idx in range(iteration):
             self.update_once()
+
+            #loss = self.criterion(input)
+            #self.loss.append(loss.sum())
         
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
@@ -164,14 +168,16 @@ class NaturalGradFDICA(FDICAbase):
         self.demix_filter = W
     
     def solve_permutation(self):
-        n_bins, n_sources = self.n_bins, self.n_sources
+        n_sources, n_bins, n_frames = self.n_sources, self.n_bins, self.n_frames
+        eps = self.eps
+
         permutations = list(itertools.permutations(range(n_sources)))
 
         W = self.demix_filter # (n_bins, n_sources, n_chennels)
         Y = self.estimation # (n_sources, n_bins, n_frames)
 
-        P = np.abs(Y).transpose(1,0,2)
-        P = P / P.sum(axis=0) # (n_bins, n_sources, n_frames)
+        P = np.abs(Y).transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        P = P / P.sum(axis=1, keepdims=True) # (n_bins, n_sources, n_frames)
         correlation = np.sum(P @ P.transpose(0,2,1), axis=(1,2)) # (n_sources,)
         indices = np.argsort(correlation)
 
@@ -183,11 +189,12 @@ class NaturalGradFDICA(FDICAbase):
             P_max = None
             perm_max = None
             for perm in permutations:
-                P_perm = np.sum(P_criteria @ P[min_idx, perm].transpose(1,0))
+                P_perm = np.sum(P_criteria @ P[min_idx, perm,:].transpose(1,0))
                 if P_max is None or P_perm > P_max:
                     P_max = P_perm
                     perm_max = perm
-            P_criteria = P_criteria + P_max
+            
+            P_criteria = P_criteria + P[min_idx,perm_max,:]
             W[min_idx,:,:] = W[min_idx,perm_max,:]
         
         self.demix_filter = W
