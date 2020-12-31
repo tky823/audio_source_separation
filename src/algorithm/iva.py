@@ -60,3 +60,7 @@ class IVAbase:
         output = estimation.transpose(1,0,2)
 
         return output
+
+class AuxIVA(IVAbase):
+    def __init__(self, eps=EPS):
+        super().__init__(eps=eps)
