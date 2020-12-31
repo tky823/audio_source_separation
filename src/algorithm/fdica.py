@@ -139,16 +139,19 @@ class NaturalGradFDICA(FDICAbase):
     
     def update_once(self):
         reference_id = self.reference_id
-        X = self.input
 
         if self.distr == 'laplace':
             self.update_laplace()
         else:
             raise NotImplementedError("Cannot support {} distribution.".format(self.distr))
 
+        X = self.input
         W = self.demix_filter
         Y = self.separate(X, demix_filter=W)
+
+        self.estimation = Y
         
+        """
         scale = projection_back(Y, reference=X[reference_id])
         Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
 
@@ -158,6 +161,7 @@ class NaturalGradFDICA(FDICAbase):
         XX_inverse = np.linalg.inv(X @ X_Hermite)
         self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
         self.estimation = Y_hat.transpose(1,0,2)
+        """
 
     def update_laplace(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -165,9 +169,14 @@ class NaturalGradFDICA(FDICAbase):
         lr = self.lr
         eps = self.eps
 
+        X = self.input
         W = self.demix_filter
-        Y = self.estimation
+        Y = self.separate(X, demix_filter=W)
         eye = np.eye(n_sources, n_channels, dtype=np.complex128)
+
+        print(Y)
+        print(Y.shape)
+        exit()
         
         Y = Y.transpose(1,0,2) # (n_bins, n_sources, n_frames)
         Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
@@ -262,7 +271,7 @@ def _test():
     mic_intervals = [8, 8, 8, 8, 8, 8, 8]
     mic_indices = [2, 5]
     degrees = [60, 300]
-    titles = ['arctic_a0001', 'arctic_a0002']
+    titles = ['man-16000', 'woman-16000']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
 
