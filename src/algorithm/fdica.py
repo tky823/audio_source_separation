@@ -196,6 +196,14 @@ class NaturalGradFDICA(FDICAbase):
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
 
+    T_min = None
+
+    for title in titles:
+        source, _ = read_wav("data/single-channel/{}.wav".format(title))
+        T = len(source)
+        if T_min is None or T < T_min:
+            T_min = T
+
     mixed_signals = []
 
     for mic_idx in mic_indices:
@@ -212,7 +220,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
                 rir = rir[:samples]
 
             source, sr = read_wav("data/single-channel/{}.wav".format(title))
-            _mixture = _mixture + np.convolve(source, rir[:, mic_idx])
+            _mixture = _mixture + np.convolve(source[:T_min], rir[:, mic_idx])
         
         mixed_signals.append(_mixture)
     
@@ -225,13 +233,14 @@ def _test():
     np.random.seed(111)
     
     # Room impulse response
+    sr = 16000
     reverb = 0.16
     duration = 0.5
-    samples = int(duration * 16000)
+    samples = int(duration * sr)
     mic_intervals = [8, 8, 8, 8, 8, 8, 8]
     mic_indices = [2, 5]
     degrees = [60, 300]
-    titles = ['man-16000', 'woman-16000']
+    titles = ['arctic_a0001', 'arctic_a0002']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
 
@@ -249,25 +258,27 @@ def _test():
     fdica = NaturalGradFDICA(lr=lr)
     estimation = fdica(mixture, iteration=iteration)
 
+    print(T)
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
     
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
     for idx in range(n_sources):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/FDICA/mixture-16000_estimated-iter{}-{}.wav".format(iteration, idx), signal=_estimated_signal, sr=16000)
+        write_wav("data/FDICA/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=16000)
 
 def _test_conv():
+    sr = 16000
     reverb = 0.16
     duration = 0.5
-    samples = int(duration * 16000)
+    samples = int(duration * sr)
     mic_indices = [2, 5]
     degrees = [60, 300]
     titles = ['man-16000', 'woman-16000']
     
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
 
-    write_wav("data/multi-channel/mixture-16000.wav", mixed_signal.T, sr=16000)
+    write_wav("data/multi-channel/mixture-{}.wav".format(sr), mixed_signal.T, sr=sr)
 
 
 if __name__ == '__main__':
