@@ -68,6 +68,22 @@ class ILRMAbase:
         output = estimation.transpose(1,0,2)
 
         return output
+    
+    def projection_back(self, estimation, demix_filter, reference_id=0):
+        n_sources = self.n_sources
+
+        W = demix_filter
+        W_inverse = np.linalg.inv(W)
+
+        Y = estimation.transpose(2,1,0)
+        # TODO: It seems waste of time. Use np.einsum() instead?
+        indices = np.arange(n_sources)
+        Y_expand = np.zeros(Y.shape + (n_sources,), dtype=np.complex128)
+        Y_expand[:,:,indices,indices] = Y
+        Y_hat = W_inverse @ Y_expand
+        Y_hat = Y_hat[:,:,reference_id,:].transpose(2,1,0)
+
+        return Y_hat
 
 class GaussILRMA(ILRMAbase):
     def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, eps=EPS):
@@ -86,11 +102,10 @@ class GaussILRMA(ILRMAbase):
         W = self.demix_filter
         Y = self.separate(X, demix_filter=W)
 
-        T = self.base
-        P = np.abs(Y)**2
-        
         """
         if self.normalize:
+            T = self.base
+            P = np.abs(Y)**2
             aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
             W = W / aux[np.newaxis,:,np.newaxis]
             Y = Y / aux[:,np.newaxis,np.newaxis]
@@ -100,10 +115,11 @@ class GaussILRMA(ILRMAbase):
                 pass
                 # self.base = T / aux[:,np.newaxis,np.newaxis]**2
         """
-        
-        scale = projection_back(Y, reference=X[self.reference_id])
-
+        """
+        scale = projection_back(Y, reference=X[reference_id])
         Y_hat = Y * scale[...,np.newaxis].conj() # (N, I, J)
+        """
+        Y_hat = self.projection_back(Y, demix_filter=W, reference_id=reference_id)
 
         _Y_hat = Y_hat.transpose(1,0,2) # (I, N, J)
         _X = X.transpose(1,0,2) # (I, M, J)
@@ -176,25 +192,6 @@ class GaussILRMA(ILRMAbase):
             W[:, source_idx, :] = w / denominator
 
         self.demix_filter = W
-
-def projection_back(Y, reference):
-    """
-    Args:
-        Y: (n_channels, n_bins, n_frames)
-        reference: (n_bins, n_frames)
-    Returns:
-        scale: (n_channels, n_bins)
-    """
-    n_channels, n_bins, _ = Y.shape
-
-    numerator = np.sum(Y * reference.conj(), axis=2) # (n_channels, n_bins)
-    denominator = np.sum(np.abs(Y)**2, axis=2) # (n_channels, n_bins)
-    scale = np.ones((n_channels, n_bins), dtype=np.complex128)
-    indices = denominator > 0.0
-    scale[indices] = numerator[indices] / denominator[indices]
-
-    return scale
-
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
