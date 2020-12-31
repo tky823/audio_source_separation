@@ -124,6 +124,7 @@ class NaturalGradFDICA(FDICAbase):
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
         
+        reference_id = self.reference_id
         X, W = input, self.demix_filter
         self.estimation = self.separate(X, demix_filter=W)
 
@@ -132,7 +133,7 @@ class NaturalGradFDICA(FDICAbase):
         X, W = input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
 
-        scale = projection_back(Y, reference=X[0])
+        scale = projection_back(Y, reference=X[reference_id])
         Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
 
         Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
@@ -144,6 +145,8 @@ class NaturalGradFDICA(FDICAbase):
 
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
+
+        self.estimation = output
 
         return output
     
