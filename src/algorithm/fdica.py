@@ -253,19 +253,18 @@ def _test():
     # FDICA
     lr = 1e-3
     n_sources = len(titles)
-    iteration = 1000
+    iteration = 200
 
     fdica = NaturalGradFDICA(lr=lr)
     estimation = fdica(mixture, iteration=iteration)
 
-    print(T)
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
     
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
     for idx in range(n_sources):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/FDICA/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=16000)
+        write_wav("data/FDICA/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=sr)
 
 def _test_conv():
     sr = 16000
