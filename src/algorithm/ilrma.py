@@ -1,5 +1,7 @@
 import numpy as np
 
+from algorithm.projection_back import projection_back
+
 EPS=1e-12
 
 class ILRMAbase:
@@ -68,7 +70,7 @@ class ILRMAbase:
         output = estimation.transpose(1,0,2)
 
         return output
-    
+    """
     def projection_back(self, estimation, demix_filter, reference_id=0):
         n_sources = self.n_sources
 
@@ -84,6 +86,7 @@ class ILRMAbase:
         Y_hat = Y_hat[:,:,reference_id,:].transpose(2,1,0)
 
         return Y_hat
+    """
 
 class GaussILRMA(ILRMAbase):
     def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, eps=EPS):
@@ -115,15 +118,17 @@ class GaussILRMA(ILRMAbase):
                 pass
                 # self.base = T / aux[:,np.newaxis,np.newaxis]**2
         """
-        """
+        
         scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (N, I, J)
+        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
+        
         """
         Y_hat = self.projection_back(Y, demix_filter=W, reference_id=reference_id)
+        """
 
-        _Y_hat = Y_hat.transpose(1,0,2) # (I, N, J)
-        _X = X.transpose(1,0,2) # (I, M, J)
-        X_Hermite = X.transpose(1,2,0).conj() # (I, J, M)
+        _Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        _X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
+        X_Hermite = X.transpose(1,2,0).conj() # (n_bins, n_frames, n_sources)
         XX_inverse = np.linalg.inv(_X @ X_Hermite)
         self.demix_filter = _Y_hat @ X_Hermite @ XX_inverse
         self.estimation = Y_hat
