@@ -70,6 +70,7 @@ class ILRMAbase:
         output = estimation.transpose(1,0,2)
 
         return output
+    
     """
     def projection_back(self, estimation, demix_filter, reference_id=0):
         n_sources = self.n_sources
@@ -192,7 +193,7 @@ class GaussILRMA(ILRMAbase):
             # TODO: condition number
             WU_inverse = np.linalg.inv(WU)[...,source_idx] # (n_bins, n_sources, n_channels)
             w = WU_inverse.conj() # (n_bins, n_channels)
-            wUw = w[:, np.newaxis, :] @ U_n @ w[:, :, np.newaxis].conj()
+            wUw = w[:, np.newaxis, :].conj() @ U_n @ w[:, :, np.newaxis]
             denominator = np.sqrt(wUw[...,0])
             W[:, source_idx, :] = w / denominator
 
