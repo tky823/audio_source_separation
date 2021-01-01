@@ -13,7 +13,7 @@ def main():
 
     # Resample
     for idx, title in enumerate(titles):
-        source, sr = librosa.load("./data/cmu_us_{}_arctic/wav/arctic_a{:.04}.wav".format(title, idx), target_sr)
+        source, sr = librosa.load("./data/cmu_us_{}_arctic/wav/arctic_a{:04d}.wav".format(title, idx+1), target_sr)
         T = len(source)
 
         if T_min is None or T < T_min:
@@ -22,7 +22,7 @@ def main():
     for idx, title in enumerate(titles):
         os.makedirs("./data/cmu_us_{}_arctic/trimmed".format(title), exist_ok=True)
         
-        source, sr = librosa.load("./data/cmu_us_{}_arctic/wav/arctic_a{:.04}.wav".format(title, idx), target_sr)
+        source, sr = librosa.load("./data/cmu_us_{}_arctic/wav/arctic_a{:04d}.wav".format(title, idx+1), target_sr)
         librosa.output.write_wav("./data/cmu_us_{}_arctic/trimmed/source-{}.wav".format(title, target_sr), source[:T_min], target_sr)
 
     # Room impulse response
