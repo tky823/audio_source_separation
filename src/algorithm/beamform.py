@@ -2,36 +2,80 @@ import numpy as np
 
 EPS=1e-12
 
-class DelaySumBeamFormer:
-    def __init__(self, reference_id=0, eps=EPS):
-        self.reference_id = reference_id
-        self.eps = eps
-    
-    def __call__(self, input, steering_vector):
-        """
+def delay_sum_beamform(input, steering_vector, reference_id=0, eps=EPS):
+    """
         Args:
             input (n_channels, n_bins, n_frames)
             steering_vector (n_bins, n_channels, n_sources)
         Returns:
             output (n_sources, n_bins, n_frames)
-        """
-        reference_id = self.reference_id
-        eps = self.eps
+    """
+    norm = np.sqrt(np.sum(steering_vector**2, axis=0)) # (n_sources,)
+    norm[norm < eps] = eps
+    steering_vector = steering_vector / norm # (n_bins, n_channels, n_sources)
+    steering_vector = steering_vector.transpose(2,1,0)[...,np.newaxis] # (n_sources, n_channels, n_bins, 1)
+    estimation = np.sum(steering_vector.conj() * input, axis=1, keepdims=True) # (n_sources, 1, n_bins, n_frames)
+    estimation = estimation * steering_vector # (n_sources, n_channels, n_bins, n_frames)
+    output = estimation[:,reference_id,:,:] # (n_sources, n_bins, n_frames)
 
-        self.input = input
+    return output
+
+def mvdr_beamform(input, steering_vector, covariance=None, reference_id=0, eps=EPS):
+    raise NotImplementedError("Implement MVDR")
+
+
+class DelaySumBeamformer:
+    def __init__(self, steering_vector, reference_id=0, eps=EPS):
         self.steering_vector = steering_vector
-
-        norm = np.sqrt(np.sum(steering_vector**2, axis=0)) # (n_sources,)
-        norm[norm < eps] = eps
-        steering_vector = steering_vector / norm # (n_bins, n_channels, n_sources)
-        steering_vector = steering_vector.transpose(2,1,0)[...,np.newaxis] # (n_sources, n_channels, n_bins, 1)
-        estimation = np.sum(steering_vector.conj() * input, axis=1, keepdims=True) # (n_sources, 1, n_bins, n_frames)
-        estimation = estimation * steering_vector # (n_sources, n_channels, n_bins, n_frames)
-        output = estimation[:,reference_id,:,:] # (n_sources, n_bins, n_frames)
-
+        self.reference_id = reference_id
+        self.eps = eps
+    
+    def __call__(self, input):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_sources, n_bins, n_frames)
+        """
+        output = delay_sum_beamform(input, self.steering_vector, reference_id=self.reference_id, eps=self.eps)
+        self.input = input
         self.estimation = output
 
         return output
+
+class MVDRBeamformer:
+    def __init__(self, steering_vector, reference_id=0, eps=EPS):
+        self.steering_vector = steering_vector
+        self.reference_id = reference_id
+        self.eps = eps
+    
+    def __call__(self, input):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_sources, n_bins, n_frames)
+        """
+        output = mvdr_beamform(input, self.steering_vector, reference_id=self.reference_id, eps=self.eps)
+        self.input = input
+        self.estimation = output
+
+        return output
+
+class MaxSNRBeamformer:
+    def __init__(self, steering_vector, reference_id=0, eps=EPS):
+        self.steering_vector = steering_vector
+        self.reference_id = reference_id
+        self.eps = eps
+    
+    def __call__(self, input):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_sources, n_bins, n_frames)
+        """
+        pass
 
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
