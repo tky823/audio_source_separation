@@ -6,12 +6,14 @@ from algorithm.projection_back import projection_back
 EPS=1e-12
 
 class FDICAbase:
-    def __init__(self, eps=EPS):
+    def __init__(self, callback=None, eps=EPS):
+        self.callback = callback
+        self.eps = eps
+
         self.input = None
+        self.criterion = None
         self.loss = []
 
-        self.eps = eps
-    
     def _reset(self):
         assert self.input is not None, "Specify data!"
 
@@ -40,9 +42,11 @@ class FDICAbase:
 
         for idx in range(iteration):
             self.update_once()
+            loss = self.criterion(input)
+            self.loss.append(loss.sum())
 
-            # loss = self.criterion(input)
-            # self.loss.append(loss.sum())
+            if self.callback is not None:
+                self.callback(self)
         
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
@@ -65,10 +69,19 @@ class FDICAbase:
         output = estimation.transpose(1,0,2)
 
         return output
+    
+    def compute_negative_loglikelihood(self):
+        Y = self.estimation
+        W = self.demix_filter
+
+        loss = 2 * np.abs(Y).sum(axis=0).mean(axis=1) - 2 * np.log(np.abs(np.linalg.det(W)))
+        loss = loss.sum()
+
+        return loss
 
 class GradFDICA(FDICAbase):
-    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, eps=EPS):
-        super().__init__(eps=eps)
+    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, callback=None, eps=EPS):
+        super().__init__(callback=callback, eps=eps)
 
         self.distr = distr
         self.lr = lr
@@ -92,6 +105,9 @@ class GradFDICA(FDICAbase):
             self.update_once()
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+
+            if self.callback is not None:
+                self.callback(self)
         
         self.solve_permutation()
 
@@ -152,15 +168,6 @@ class GradFDICA(FDICAbase):
         W = W - lr * delta # (n_bins, n_sources, n_channels)
 
         self.demix_filter = W
-
-    def compute_negative_loglikelihood(self):
-        Y = self.estimation
-        W = self.demix_filter
-
-        loss = 2 * np.abs(Y).sum(axis=0).mean(axis=1) - 2 * np.log(np.abs(np.linalg.det(W)))
-        loss = loss.sum()
-
-        return loss
     
     def solve_permutation(self):
         n_sources, n_bins, n_frames = self.n_sources, self.n_bins, self.n_frames
@@ -197,8 +204,8 @@ class GradFDICA(FDICAbase):
         self.demix_filter = W
 
 class NaturalGradFDICA(GradFDICA):
-    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, eps=EPS):
-        super().__init__(distr=distr, lr=lr, reference_id=reference_id, eps=eps)
+    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, callback=None, eps=EPS):
+        super().__init__(distr=distr, lr=lr, reference_id=reference_id, callback=callback, eps=eps)
 
         self.distr = distr
         self.lr = lr
