@@ -5,13 +5,16 @@ from algorithm.projection_back import projection_back
 EPS=1e-12
 
 class ILRMAbase:
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, callback=None, eps=EPS):
+        self.callback = callback
+        self.eps = eps
         self.input = None
         self.n_bases = n_bases
+        self.loss = [] # TODO: monitoring loss
 
         self.partitioning = partitioning
         self.normalize = normalize
-        self.eps = eps
+        
     
     def _reset(self):
         assert self.input is not None, "Specify data!"
@@ -48,6 +51,9 @@ class ILRMAbase:
 
         for idx in range(iteration):
             self.update_once()
+
+            if self.callback is not None:
+                self.callback(self)
         
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
@@ -90,8 +96,8 @@ class ILRMAbase:
     """
 
 class GaussILRMA(ILRMAbase):
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, eps=EPS):
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, eps=eps)
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
         self.reference_id = reference_id
     
@@ -108,6 +114,9 @@ class GaussILRMA(ILRMAbase):
 
         for idx in range(iteration):
             self.update_once()
+
+            if self.callback is not None:
+                self.callback(self)
         
         reference_id = self.reference_id
         W = self.demix_filter
