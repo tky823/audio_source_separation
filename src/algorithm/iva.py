@@ -7,6 +7,7 @@ EPS=1e-12
 class IVAbase:
     def __init__(self, eps=EPS):
         self.input = None
+        self.loss = []
 
         self.eps = eps
     
@@ -62,7 +63,13 @@ class IVAbase:
         return output
     
     def compute_negative_loglikelihood(self):
-        raise NotImplementedError("Implement compute_negative_loglikelihood")
+        Y = self.estimation
+        W = self.demix_filter
+
+        P = np.sum(np.abs(Y)**2, axis=1)
+        loss = 2 * np.sum(np.sqrt(P), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+
+        return loss
 
 class GradIVA(IVAbase):
     def __init__(self, distr='laplace', lr=1e-1, reference_id=0, eps=EPS):
@@ -254,7 +261,7 @@ def _test(method='AuxIVA'):
         iva = NaturalGradIVA(lr=lr)
         iteration = 200
     elif method == 'AuxIVA':
-        iva = AuxIVA(lr=lr)
+        iva = AuxIVA()
         iteration = 200
     else:
         raise ValueError("Not support method {}".format(method))
@@ -299,6 +306,6 @@ if __name__ == '__main__':
     """
 
     # _test_conv()
-    #_test(method='GradIVA')
-    #_test(method='NaturalGradIVA')
+    _test(method='GradIVA')
+    _test(method='NaturalGradIVA')
     #_test(method='IVA')
