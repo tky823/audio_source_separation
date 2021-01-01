@@ -4,19 +4,15 @@ from algorithm.projection_back import projection_back
 
 EPS=1e-12
 
-class ILRMAbase:
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, eps=EPS):
+class IVAbase:
+    def __init__(self, eps=EPS):
         self.input = None
-        self.n_bases = n_bases
+        self.loss = []
 
-        self.partitioning = partitioning
-        self.normalize = normalize
         self.eps = eps
     
     def _reset(self):
         assert self.input is not None, "Specify data!"
-
-        n_bases = self.n_bases
 
         X = self.input
 
@@ -28,12 +24,7 @@ class ILRMAbase:
 
         W = np.eye(n_channels, dtype=np.complex128)
         self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
-        self.base = np.random.rand(n_channels, n_bins, n_bases)
-        self.activation = np.random.rand(n_channels, n_bases, n_frames)
         self.estimation = self.separate(X, demix_filter=W)
-
-        if self.partitioning:
-            self.latent = np.ones(n_sources, n_bases) / n_sources
         
     def __call__(self, input, iteration=100):
         """
@@ -71,27 +62,136 @@ class ILRMAbase:
 
         return output
     
-    """
-    def projection_back(self, estimation, demix_filter, reference_id=0):
-        n_sources = self.n_sources
+    def compute_negative_loglikelihood(self):
+        Y = self.estimation
+        W = self.demix_filter
 
-        W = demix_filter
+        P = np.sum(np.abs(Y)**2, axis=1)
+        loss = 2 * np.sum(np.sqrt(P), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+
+        return loss
+
+class GradIVA(IVAbase):
+    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, eps=EPS):
+        super().__init__(eps=eps)
+
+        self.distr = distr
+        self.lr = lr
+        self.reference_id = reference_id
+    
+    def __call__(self, input, iteration=100):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset()
+
+        loss = self.compute_negative_loglikelihood()
+        self.loss.append(loss)
+
+        for idx in range(iteration):
+            self.update_once()
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
+
+        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
+        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
+        XX_inverse = np.linalg.inv(X @ X_Hermite)
+        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
+
+        X, W = input, self.demix_filter
+        output = self.separate(X, demix_filter=W)
+
+        self.estimation = output
+
+        return output
+    
+    def update_once(self):
+        reference_id = self.reference_id
+
+        if self.distr == 'laplace':
+            self.update_laplace()
+        else:
+            raise NotImplementedError("Cannot support {} distribution.".format(self.distr))
+
+        X = self.input
+        W = self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        self.estimation = Y
+    
+    def update_laplace(self):
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_frames = self.n_frames
+        lr = self.lr
+        eps = self.eps
+
+        X = self.input
+        W = self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        X_Hermite = X.transpose(1,2,0).conj() # (n_bins, n_frames, n_sources)
         W_inverse = np.linalg.inv(W)
+        W_inverseHermite = W_inverse.transpose(0,2,1).conj() # (n_bins, n_channels, n_sources)
 
-        Y = estimation.transpose(2,1,0)
-        # TODO: It seems waste of time. Use np.einsum() instead?
-        indices = np.arange(n_sources)
-        Y_expand = np.zeros(Y.shape + (n_sources,), dtype=np.complex128)
-        Y_expand[:,:,indices,indices] = Y
-        Y_hat = W_inverse @ Y_expand
-        Y_hat = Y_hat[:,:,reference_id,:].transpose(2,1,0)
+        Y = Y.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        P = np.abs(Y)**2
+        denominator = np.sqrt(P.sum(axis=0))
+        denominator[denominator < eps] = eps
+        Phi = Y / denominator # (n_bins, n_sources, n_frames)
 
-        return Y_hat
-    """
+        delta = (Phi @ X_Hermite) / n_frames - W_inverseHermite
+        W = W - lr * delta # (n_bins, n_sources, n_channels)
 
-class GaussILRMA(ILRMAbase):
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, eps=EPS):
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, eps=eps)
+        self.demix_filter = W
+
+class NaturalGradIVA(GradIVA):
+    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, eps=EPS):
+        super().__init__(distr=distr, lr=lr, reference_id=reference_id, eps=eps)
+
+        self.distr = distr
+        self.lr = lr
+        self.reference_id = reference_id
+
+    def update_laplace(self):
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_frames = self.n_frames
+        lr = self.lr
+        eps = self.eps
+
+        X = self.input
+        W = self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+        eye = np.eye(n_sources, n_channels, dtype=np.complex128)
+
+        Y = Y.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
+        P = np.abs(Y)**2
+        denominator = np.sqrt(P.sum(axis=0))
+        denominator[denominator < eps] = eps
+        Phi = Y / denominator # (n_bins, n_sources, n_frames)
+
+        delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
+        W = W - lr * delta # (n_bins, n_sources, n_channels)
+
+        self.demix_filter = W
+
+
+class AuxIVA(IVAbase):
+    def __init__(self, reference_id=0, eps=EPS):
+        super().__init__(eps=eps)
 
         self.reference_id = reference_id
     
@@ -106,118 +206,49 @@ class GaussILRMA(ILRMAbase):
 
         self._reset()
 
+        loss = self.compute_negative_loglikelihood()
+        self.loss.append(loss)
+
         for idx in range(iteration):
             self.update_once()
-        
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
         reference_id = self.reference_id
-        W = self.demix_filter
-        X = self.input
+        X, W = input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
-        
+
         scale = projection_back(Y, reference=X[reference_id])
         Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
+
         Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
         X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
+        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
         XX_inverse = np.linalg.inv(X @ X_Hermite)
         self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-        
+
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
+
         self.estimation = output
 
         return output
-
-    def update_once(self):
-        reference_id = self.reference_id
-
-        X = self.input
-
-        self.update_source_model()
-        self.update_space_model()
-
-        W = self.demix_filter
-        Y = self.separate(X, demix_filter=W)
-        self.estimation = Y
-        """
-        if self.normalize:
-            T = self.base
-            P = np.abs(Y)**2
-            aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
-            W = W / aux[np.newaxis,:,np.newaxis]
-            Y = Y / aux[:,np.newaxis,np.newaxis]
-            if self.partitioning:
-                pass
-            else:
-                pass
-                # self.base = T / aux[:,np.newaxis,np.newaxis]**2
-        """
-        """
-        scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
-        """
-        """
-        Y_hat = self.projection_back(Y, demix_filter=W, reference_id=reference_id)
-        """
-        """
-        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
-        XX_inverse = np.linalg.inv(X @ X_Hermite)
-        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-        self.estimation = Y_hat.transpose(1,0,2)
-        """
     
-    def update_source_model(self):
-        eps = self.eps
-
-        X, W = self.input, self.demix_filter
-        estimation = self.separate(X, demix_filter=W)
-        P = np.abs(estimation)**2
-
-        T, V = self.base, self.activation
-
-        if self.partitioning:
-            Z = self.latent
-
-            raise NotImplementedError("Not support for partitioning function.")
-
-        # Update bases
-        V_transpose = V.transpose(0,2,1)
-        TV = T @ V
-        TV[TV < eps] = eps
-        division, TV_inverse = P / TV**2, 1 / TV
-        TVV = TV_inverse @ V_transpose
-        TVV[TVV < eps] = eps
-        T = T * np.sqrt(division @ V_transpose / TVV)
-        T[T < eps] = eps
-
-        # Update activations
-        T_transpose = T.transpose(0,2,1)
-        TV = T @ V
-        TV[TV < eps] = eps
-        division, TV_inverse = P / (TV**2), 1 / TV
-        TTV = T_transpose @ TV_inverse
-        TTV[TTV < eps] = eps
-        V = V * np.sqrt(T_transpose @ division / TTV)
-        V[V < eps] = eps
-
-        self.bases, self.activation = T, V
-
-    def update_space_model(self):
+    def update_once(self):
         n_sources = self.n_sources
         n_bins = self.n_bins
         eps = self.eps
 
         X, W = self.input, self.demix_filter
-        TV = self.base @ self.activation
+        Y = self.estimation
         
         X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
         X = X[...,np.newaxis]
         X_Hermite = X.transpose(0,1,3,2).conj()
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
-        R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
-        U = XX / R
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        R = np.sqrt(P.sum(axis=1))[:,np.newaxis,:,np.newaxis,np.newaxis] # (n_sources, 1, n_frames, 1, 1)
+        U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
 
         for source_idx in range(n_sources):
@@ -231,7 +262,14 @@ class GaussILRMA(ILRMAbase):
             denominator = np.sqrt(wUw[...,0])
             W[:, source_idx, :] = w / denominator
 
+        
         self.demix_filter = W
+
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
+        
+        self.estimation = Y
+
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
@@ -239,7 +277,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
     T_min = None
 
     for title in titles:
-        source, sr = read_wav("data/single-channel/{}.wav".format(title))
+        source, _ = read_wav("data/single-channel/{}.wav".format(title))
         T = len(source)
         if T_min is None or T < T_min:
             T_min = T
@@ -268,7 +306,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
     return mixed_signals
 
-def _test():
+def _test(method='AuxIVA'):
     np.random.seed(111)
     
     # Room impulse response
@@ -283,45 +321,50 @@ def _test():
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
 
-    n_sources, T = mixed_signal.shape
+    n_channels, T = mixed_signal.shape
     
     # STFT
     fft_size, hop_size = 2048, 1024
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
-    # ILRMA
-    n_bases = 10
-    n_channels = len(titles)
+    # IVA
+    lr = 0.1
+    n_sources = len(titles)
     iteration = 200
 
-    gauss_ilrma = GaussILRMA(n_bases=n_bases)
-    estimation = gauss_ilrma(mixture, iteration=iteration)
+    if method == 'GradIVA':
+        iva = GradIVA(lr=lr)
+        iteration = 5000
+    elif method == 'NaturalGradIVA':
+        iva = NaturalGradIVA(lr=lr)
+        iteration = 200
+    elif method == 'AuxIVA':
+        iva = AuxIVA()
+        iteration = 50
+    else:
+        raise ValueError("Not support method {}".format(method))
+
+    estimation = iva(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
     
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
-    for idx in range(n_channels):
+    for idx in range(n_sources):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/ILRMA/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=sr)
-
-def _test_conv():
-    sr = 16000
-    reverb = 0.16
-    duration = 0.5
-    samples = int(duration * sr)
-    mic_indices = [2, 5]
-    degrees = [60, 300]
-    titles = ['man-16000', 'woman-16000']
+        write_wav("data/IVA/{}/mixture-{}_estimated-iter{}-{}.wav".format(method, sr, iteration, idx), signal=_estimated_signal, sr=sr)
     
-    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
+    plt.figure()
+    plt.plot(iva.loss, color='black')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
+    plt.close()
 
-    write_wav("data/multi-channel/mixture-{}.wav".format(sr), mixed_signal.T, sr=sr)
 
 if __name__ == '__main__':
     import os
     import matplotlib.pyplot as plt
-    import numpy as np
     from scipy.io import loadmat
 
     from utils.utils_audio import read_wav, write_wav
@@ -330,7 +373,10 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/ILRMA", exist_ok=True)
+    os.makedirs("data/IVA/GradIVA", exist_ok=True)
+    os.makedirs("data/iVA/NaturalGradIVA", exist_ok=True)
+    os.makedirs("data/iVA/AuxIVA", exist_ok=True)
+
 
     """
     Use multichannel room impulse response database.
@@ -338,4 +384,6 @@ if __name__ == '__main__':
     """
 
     # _test_conv()
-    _test()
+    _test(method='GradIVA')
+    _test(method='NaturalGradIVA')
+    _test(method='AuxIVA')

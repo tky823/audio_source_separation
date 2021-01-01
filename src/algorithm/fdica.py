@@ -67,38 +67,7 @@ class FDICAbase:
         return output
 
 class GradFDICA(FDICAbase):
-    def __init__(self, distr='laplace', lr=1e-3, reference_id=0, eps=EPS):
-        super().__init__(eps=eps)
-
-        self.distr = distr
-        self.lr = lr
-        self.reference_id = reference_id
-    
-    def __call__(self, input, iteration=100):
-        """
-        Args:
-            input (n_channels, n_bins, n_frames)
-        Returns:
-            output (n_channels, n_bins, n_frames)
-        """
-        self.input = input
-
-        self._reset()
-
-        for idx in range(iteration):
-            self.update_once()
-            #loss = self.compute_negative_loglikelihood(estimation)
-            #self.loss.append(loss)
-        
-        self.solve_permutation()
-
-        X, W = input, self.demix_filter
-        output = self.separate(X, demix_filter=W)
-
-        return output
-
-class NaturalGradFDICA(FDICAbase):
-    def __init__(self, distr='laplace', lr=1e-3, reference_id=0, eps=EPS):
+    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, eps=EPS):
         super().__init__(eps=eps)
 
         self.distr = distr
@@ -124,15 +93,13 @@ class NaturalGradFDICA(FDICAbase):
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
         
-        X, W = input, self.demix_filter
-        self.estimation = self.separate(X, demix_filter=W)
-
         self.solve_permutation()
 
+        reference_id = self.reference_id
         X, W = input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
 
-        scale = projection_back(Y, reference=X[0])
+        scale = projection_back(Y, reference=X[reference_id])
         Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
 
         Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
@@ -140,21 +107,13 @@ class NaturalGradFDICA(FDICAbase):
         X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
         XX_inverse = np.linalg.inv(X @ X_Hermite)
         self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-        self.estimation = Y_hat.transpose(1,0,2)
 
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
 
+        self.estimation = output
+
         return output
-    
-    def compute_negative_loglikelihood(self):
-        Y = self.estimation
-        W = self.demix_filter
-
-        loss = 2 * np.abs(Y).sum(axis=0).mean(axis=1) - 2 * np.log(np.abs(np.linalg.det(W)))
-        loss = loss.sum()
-
-        return loss
     
     def update_once(self):
         reference_id = self.reference_id
@@ -169,7 +128,7 @@ class NaturalGradFDICA(FDICAbase):
         Y = self.separate(X, demix_filter=W)
 
         self.estimation = Y
-
+    
     def update_laplace(self):
         n_sources, n_channels = self.n_sources, self.n_channels
         n_frames = self.n_frames
@@ -179,18 +138,29 @@ class NaturalGradFDICA(FDICAbase):
         X = self.input
         W = self.demix_filter
         Y = self.separate(X, demix_filter=W)
-        eye = np.eye(n_sources, n_channels, dtype=np.complex128)
+
+        X_Hermite = X.transpose(1,2,0).conj() # (n_bins, n_frames, n_sources)
+        W_inverse = np.linalg.inv(W)
+        W_inverseHermite = W_inverse.transpose(0,2,1).conj() # (n_bins, n_channels, n_sources)
 
         Y = Y.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
         denominator = np.abs(Y)
         denominator[denominator < eps] = eps
         Phi = Y / denominator # (n_bins, n_sources, n_frames)
 
-        delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
+        delta = (Phi @ X_Hermite) / n_frames - W_inverseHermite
         W = W - lr * delta # (n_bins, n_sources, n_channels)
 
         self.demix_filter = W
+
+    def compute_negative_loglikelihood(self):
+        Y = self.estimation
+        W = self.demix_filter
+
+        loss = 2 * np.abs(Y).sum(axis=0).mean(axis=1) - 2 * np.log(np.abs(np.linalg.det(W)))
+        loss = loss.sum()
+
+        return loss
     
     def solve_permutation(self):
         n_sources, n_bins, n_frames = self.n_sources, self.n_bins, self.n_frames
@@ -224,6 +194,36 @@ class NaturalGradFDICA(FDICAbase):
             P_criteria = P_criteria + P[min_idx,perm_max,:]
             W[min_idx,:,:] = W[min_idx,perm_max,:]
         
+        self.demix_filter = W
+
+class NaturalGradFDICA(GradFDICA):
+    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, eps=EPS):
+        super().__init__(distr=distr, lr=lr, reference_id=reference_id, eps=eps)
+
+        self.distr = distr
+        self.lr = lr
+        self.reference_id = reference_id
+
+    def update_laplace(self):
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_frames = self.n_frames
+        lr = self.lr
+        eps = self.eps
+
+        X = self.input
+        W = self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+        eye = np.eye(n_sources, n_channels, dtype=np.complex128)
+
+        Y = Y.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
+        denominator = np.abs(Y)
+        denominator[denominator < eps] = eps
+        Phi = Y / denominator # (n_bins, n_sources, n_frames)
+
+        delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
+        W = W - lr * delta # (n_bins, n_sources, n_channels)
+
         self.demix_filter = W
 
 
@@ -263,7 +263,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
     return mixed_signals
 
 
-def _test():
+def _test(method='NaturalGradFDICA'):
     np.random.seed(111)
     
     # Room impulse response
@@ -281,7 +281,7 @@ def _test():
     n_channels, T = mixed_signal.shape
     
     # STFT
-    fft_size, hop_size = 4096, 2048
+    fft_size, hop_size = 2048, 1024
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # FDICA
@@ -289,7 +289,15 @@ def _test():
     n_sources = len(titles)
     iteration = 200
 
-    fdica = NaturalGradFDICA(lr=lr)
+    if method == 'GradFDICA':
+        fdica = GradFDICA(lr=lr)
+        iteration = 5000
+    elif method == 'NaturalGradFDICA':
+        fdica = NaturalGradFDICA(lr=lr)
+        iteration = 200
+    else:
+        raise ValueError("Not support method {}".format(method))
+
     estimation = fdica(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
@@ -298,13 +306,13 @@ def _test():
 
     for idx in range(n_sources):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/FDICA/NaturalGradFDICA/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=sr)
+        write_wav("data/FDICA/{}/mixture-{}_estimated-iter{}-{}.wav".format(method, sr, iteration, idx), signal=_estimated_signal, sr=sr)
     
     plt.figure()
     plt.plot(fdica.loss, color='black')
     plt.xlabel('Iteration')
     plt.ylabel('Loss')
-    plt.savefig('data/FDICA/NaturalGradFDICA/loss.png', bbox_inches='tight')
+    plt.savefig('data/FDICA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
 
 def _test_conv():
@@ -332,6 +340,7 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
+    os.makedirs("data/FDICA/GradFDICA", exist_ok=True)
     os.makedirs("data/FDICA/NaturalGradFDICA", exist_ok=True)
 
     """
@@ -340,4 +349,5 @@ if __name__ == '__main__':
     """
 
     # _test_conv()
-    _test()
+    _test(method='GradFDICA')
+    _test(method='NaturalGradFDICA')
