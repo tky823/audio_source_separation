@@ -3,12 +3,36 @@ import numpy as np
 EPS=1e-12
 
 class DelaySumBeamFormer:
-    def __init__(self, steering_vector=None, eps=EPS):
-        self.steering_vector = steering_vector
+    def __init__(self, reference_id=0, eps=EPS):
+        self.reference_id = reference_id
         self.eps = eps
     
-    def __call__(self, input):
-        pass
+    def __call__(self, input, steering_vector):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+            steering_vector (n_bins, n_channels, n_sources)
+        Returns:
+            output (n_sources, n_bins, n_frames)
+        """
+        reference_id = self.reference_id
+        eps = self.eps
+
+        self.input = input
+        self.steering_vector = steering_vector
+
+        norm = np.sqrt(np.sum(steering_vector**2, axis=0)) # (n_sources,)
+        norm[norm < eps] = eps
+        steering_vector = steering_vector / norm # (n_bins, n_channels, n_sources)
+        steering_vector = steering_vector.transpose(2,1,0)[...,np.newaxis] # (n_sources, n_channels, n_bins, 1)
+        estimation = np.sum(steering_vector.conj() * input, axis=1, keepdims=True) # (n_sources, 1, n_bins, n_frames)
+        estimation = estimation * steering_vector # (n_sources, n_channels, n_bins, n_frames)
+        output = estimation[:,reference_id,:,:] # (n_sources, n_bins, n_frames)
+
+        self.estimation = output
+
+        return output
+
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
@@ -73,13 +97,10 @@ def _test(method='DSBF'):
     omega = omega[:,np.newaxis,np.newaxis] # (n_bins, 1, 1)
     inner_product = np.sum(source_position * mic_position, axis=2) # (n_channels, n_sources)
     steering_vector = np.exp(2j * np.pi * omega * inner_product / sound_speed) / np.sqrt(n_channels) # (n_channels, n_sources)
-    norm = np.sqrt(np.sum(steering_vector**2, axis=0)) # (n_sources,)
-    norm[norm < EPS] = EPS
-    steering_vector = steering_vector / norm # (n_bins, n_channels, n_sources)
-    steering_vector = steering_vector.transpose(2,1,0)[...,np.newaxis] # (n_sources, n_channels, n_bins, 1)
-    estimation = np.sum(steering_vector.conj() * mixture, axis=1, keepdims=True) # (n_sources, 1, n_bins, n_frames)
-    estimation = estimation * steering_vector # (n_sources, n_channels, n_bins, n_frames)
-    estimation = estimation[:,0,:,:] # (n_sources, n_bins, n_frames)
+
+    beamformer = DelaySumBeamFormer()
+    estimation = beamformer(mixture, steering_vector=steering_vector)
+
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
 
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
@@ -87,7 +108,6 @@ def _test(method='DSBF'):
     for idx in range(n_sources):
         _estimated_signal = estimated_signal[idx]
         write_wav("data/Beamform/{}/mixture-{}_estimated-{}.wav".format(method, sr, idx), signal=_estimated_signal, sr=sr)
-
 
 if __name__ == '__main__':
     import os
