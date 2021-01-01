@@ -5,11 +5,12 @@ from algorithm.projection_back import projection_back
 EPS=1e-12
 
 class IVAbase:
-    def __init__(self, eps=EPS):
+    def __init__(self, callback=None, eps=EPS):
+        self.callback = callback
+        self.eps = eps
+
         self.input = None
         self.loss = []
-
-        self.eps = eps
     
     def _reset(self):
         assert self.input is not None, "Specify data!"
@@ -39,6 +40,12 @@ class IVAbase:
 
         for idx in range(iteration):
             self.update_once()
+
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
+            if self.callback is not None:
+                self.callback(self)
         
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
@@ -72,8 +79,8 @@ class IVAbase:
         return loss
 
 class GradIVA(IVAbase):
-    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, eps=EPS):
-        super().__init__(eps=eps)
+    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, callback=None, eps=EPS):
+        super().__init__(callback=callback, eps=eps)
 
         self.distr = distr
         self.lr = lr
@@ -97,6 +104,9 @@ class GradIVA(IVAbase):
             self.update_once()
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+
+            if self.callback is not None:
+                self.callback(self)
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
@@ -158,8 +168,8 @@ class GradIVA(IVAbase):
         self.demix_filter = W
 
 class NaturalGradIVA(GradIVA):
-    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, eps=EPS):
-        super().__init__(distr=distr, lr=lr, reference_id=reference_id, eps=eps)
+    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, callback=None, eps=EPS):
+        super().__init__(distr=distr, lr=lr, reference_id=reference_id, callback=callback, eps=eps)
 
         self.distr = distr
         self.lr = lr
@@ -190,8 +200,8 @@ class NaturalGradIVA(GradIVA):
 
 
 class AuxIVA(IVAbase):
-    def __init__(self, reference_id=0, eps=EPS):
-        super().__init__(eps=eps)
+    def __init__(self, reference_id=0, callback=None, eps=EPS):
+        super().__init__(callback=callback, eps=eps)
 
         self.reference_id = reference_id
     
@@ -213,6 +223,9 @@ class AuxIVA(IVAbase):
             self.update_once()
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+
+            if self.callback is not None:
+                self.callback(self)
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
