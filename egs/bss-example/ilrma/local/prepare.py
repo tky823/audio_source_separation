@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 import numpy as np
 from scipy.io import loadmat
 import librosa
 
 def main():
-    titles = ['wizard', 'swordwoman', 'thief-boy']
+    titles = ['aew', 'axb', 'bdl']
     target_sr = 16000
     T_min = None
 
     # Resample
-    for title in titles:
-        source, sr = librosa.load("./data/{}/source-44100.mp3".format(title), target_sr)
+    for idx, title in enumerate(titles):
+        source, sr = librosa.load("./data/cmu_us_{}_arctic/wav/arctic_a{:04d}.wav".format(title, idx+1), target_sr)
         T = len(source)
-        librosa.output.write_wav("./data/{}/source-{}.wav".format(title, target_sr), source, target_sr)
 
         if T_min is None or T < T_min:
             T_min = T
     
-    for title in titles:
-        source, sr = librosa.load("./data/{}/source-44100.mp3".format(title), target_sr)
-        librosa.output.write_wav("./data/{}/source-{}.wav".format(title, target_sr), source[:T_min], target_sr)
+    for idx, title in enumerate(titles):
+        os.makedirs("./data/cmu_us_{}_arctic/trimmed".format(title), exist_ok=True)
+        
+        source, sr = librosa.load("./data/cmu_us_{}_arctic/wav/arctic_a{:04d}.wav".format(title, idx+1), target_sr)
+        librosa.output.write_wav("./data/cmu_us_{}_arctic/trimmed/source-{}.wav".format(title, target_sr), source[:T_min], target_sr)
 
     # Room impulse response
     reverb = 0.16
@@ -46,10 +48,10 @@ def convolve_mird(title, reverb=0.160, degree=0, mic_intervals="3-3-3-8-3-3-3", 
     if samples is not None:
         rir = rir[:samples]
 
-    source, sr = librosa.load("data/{}/source-{}.wav".format(title, sr), sr)
+    source, sr = librosa.load("data/cmu_us_{}_arctic/trimmed/source-{}.wav".format(title, sr), sr)
     convolved_signals = np.convolve(source, rir[:, mic_idx])
 
-    librosa.output.write_wav("./data/{}/convolved-{}_deg{}-mic{}.wav".format(title, sr, degree, mic_idx), convolved_signals, sr)
+    librosa.output.write_wav("./data/cmu_us_{}_arctic/trimmed/convolved-{}_deg{}-mic{}.wav".format(title, sr, degree, mic_idx), convolved_signals, sr)
     
 if __name__ == '__main__':
     main()
