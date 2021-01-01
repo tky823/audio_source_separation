@@ -190,8 +190,86 @@ class NaturalGradIVA(GradIVA):
 
 
 class AuxIVA(IVAbase):
-    def __init__(self, eps=EPS):
+    def __init__(self, reference_id=0, eps=EPS):
         super().__init__(eps=eps)
+
+        self.reference_id = reference_id
+    
+    def __call__(self, input, iteration=100):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset()
+
+        loss = self.compute_negative_loglikelihood()
+        self.loss.append(loss)
+
+        for idx in range(iteration):
+            self.update_once()
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
+
+        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
+        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
+        XX_inverse = np.linalg.inv(X @ X_Hermite)
+        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
+
+        X, W = input, self.demix_filter
+        output = self.separate(X, demix_filter=W)
+
+        self.estimation = output
+
+        return output
+    
+    def update_once(self):
+        n_sources = self.n_sources
+        n_bins = self.n_bins
+        eps = self.eps
+
+        X, W = self.input, self.demix_filter
+        Y = self.estimation
+        
+        X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
+        X = X[...,np.newaxis]
+        X_Hermite = X.transpose(0,1,3,2).conj()
+        XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        R = np.sqrt(P.sum(axis=1))[:,np.newaxis,:,np.newaxis,np.newaxis] # (n_sources, 1, n_frames, 1, 1)
+        U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
+        U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
+
+        for source_idx in range(n_sources):
+            # W: (n_bins, n_sources, n_channels), U: (N, n_bins, n_channels, n_channels)
+            U_n = U[source_idx] # (n_bins, n_channels, n_channels)
+            WU = W @ U_n # (n_bins, n_sources, n_channels)
+            # TODO: condition number
+            WU_inverse = np.linalg.inv(WU)[...,source_idx] # (n_bins, n_sources, n_channels)
+            w = WU_inverse.conj() # (n_bins, n_channels)
+            wUw = w[:, np.newaxis, :].conj() @ U_n @ w[:, :, np.newaxis]
+            denominator = np.sqrt(wUw[...,0])
+            W[:, source_idx, :] = w / denominator
+
+        
+        self.demix_filter = W
+
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
+        
+        self.estimation = Y
+
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
@@ -262,7 +340,7 @@ def _test(method='AuxIVA'):
         iteration = 200
     elif method == 'AuxIVA':
         iva = AuxIVA()
-        iteration = 200
+        iteration = 50
     else:
         raise ValueError("Not support method {}".format(method))
 
@@ -308,4 +386,4 @@ if __name__ == '__main__':
     # _test_conv()
     _test(method='GradIVA')
     _test(method='NaturalGradIVA')
-    #_test(method='IVA')
+    _test(method='AuxIVA')
