@@ -10,14 +10,14 @@ import librosa
 parser = argparse.ArgumentParser(description="Example of frequency-domain ICA (FDICA)")
 
 parser.add_argument('--data_root', type=str, default=None, help='Path for dataset ROOT directory.')
-parser.add_argument('--titles', type=str, default="[aew,axb,bdl]", help='Path for dataset ROOT directory.')
+parser.add_argument('--titles', type=str, default="aew axb bdl", help='Path for dataset ROOT directory.')
 parser.add_argument('--reverb', type=float, default=0.16, help='The reverberation time (T60).')
 parser.add_argument('--duration', type=float, default=0.5, help='The truncating time of impulse response.')
 parser.add_argument('--mic_intervals', type=str, default="8-8-8-8-8-8-8", help='The microphone intervals.')
 
 def main(args):
     data_root = args.data_root
-    titles = args.titles.replace('[','').replace(']','').split(',')
+    titles = args.titles.split(' ')
     target_sr = 16000
     T_min = None
 
@@ -72,4 +72,4 @@ def convolve_mird(data_root, title, reverb=0.160, degree=0, mic_intervals="3-3-3
 if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
-    main()
+    main(args)
