@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description="Example of frequency-domain ICA (F
 parser.add_argument('--data_root', type=str, default=None, help='Path for dataset ROOT directory.')
 parser.add_argument('--titles', type=str, default="aew axb bdl", help='Path for dataset ROOT directory.')
 parser.add_argument('--reverb', type=float, default=0.16, help='The reverberation time (T60).')
-parser.add_argument('--duration', type=float, default=0.5, help='The truncating time of impulse response.')
+parser.add_argument('--duration', type=float, default=0.5, help='The trimming time of impulse response.')
 parser.add_argument('--mic_intervals', type=str, default="8-8-8-8-8-8-8", help='The microphone intervals.')
 
 def main(args):
