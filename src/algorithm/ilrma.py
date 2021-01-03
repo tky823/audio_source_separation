@@ -1,5 +1,4 @@
 import numpy as np
-from numpy.core.defchararray import partition
 
 from algorithm.projection_back import projection_back
 from criterion.divergence import is_divergence
