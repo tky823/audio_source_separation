@@ -5,9 +5,9 @@ EPS=1e-12
 def kl_divergence(input, target, eps=EPS):
     """
     Args:
-        input (C, ...)
+        input (C, *)
     Returns:
-        loss (...)
+        loss (*)
     """
     _input = input + eps
     _target = target + eps
@@ -21,7 +21,7 @@ def kl_divergence(input, target, eps=EPS):
 def is_divergence(input, target, eps=EPS):
     """
     Args:
-        input (...)
+        input (*)
     """
     _input = input + eps
     _target = target + eps
@@ -34,7 +34,7 @@ def is_divergence(input, target, eps=EPS):
 def generalized_kl_divergence(input, target, eps=EPS):
     """
     Args:
-        input (...)
+        input (*)
     """
     _input = input + eps
     _target = target + eps
@@ -49,7 +49,7 @@ def beta_divergence(input, target, beta=2):
     Beta divergence
 
     Args:
-        input (batch_size, ...)
+        input (batch_size, *)
     """
     beta_minus1 = beta - 1
 

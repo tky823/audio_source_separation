@@ -1,6 +1,7 @@
 import numpy as np
 
 from algorithm.projection_back import projection_back
+from criterion.divergence import is_divergence
 
 EPS=1e-12
 
@@ -10,7 +11,7 @@ class ILRMAbase:
         self.eps = eps
         self.input = None
         self.n_bases = n_bases
-        self.loss = [] # TODO: monitoring loss
+        self.loss = []
 
         self.partitioning = partitioning
         self.normalize = normalize
@@ -29,10 +30,10 @@ class ILRMAbase:
         self.n_sources, self.n_channels = n_sources, n_channels
         self.n_bins, self.n_frames = n_bins, n_frames
 
-        W = np.eye(n_channels, dtype=np.complex128)
+        W = np.eye(n_sources, n_channels, dtype=np.complex128)
         self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
-        self.base = np.random.rand(n_channels, n_bins, n_bases)
-        self.activation = np.random.rand(n_channels, n_bases, n_frames)
+        self.base = np.random.rand(n_sources, n_bins, n_bases)
+        self.activation = np.random.rand(n_sources, n_bases, n_frames)
         self.estimation = self.separate(X, demix_filter=W)
 
         if self.partitioning:
@@ -51,6 +52,9 @@ class ILRMAbase:
 
         for idx in range(iteration):
             self.update_once()
+
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
 
             if self.callback is not None:
                 self.callback(self)
@@ -76,6 +80,21 @@ class ILRMAbase:
         output = estimation.transpose(1,0,2)
 
         return output
+    
+    def compute_negative_loglikelihood(self):
+        n_frames = self.n_frames
+        eps = self.eps
+
+        Y = self.estimation
+        W = self.demix_filter
+        T, V = self.base, self.activation
+
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        R = T @ V # (n_sources, n_bins, n_frames)
+        R[R < eps] = eps
+        loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
+
+        return loss
 
 class GaussILRMA(ILRMAbase):
     def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
@@ -97,6 +116,9 @@ class GaussILRMA(ILRMAbase):
         for idx in range(iteration):
             self.update_once()
 
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
             if self.callback is not None:
                 self.callback(self)
         
@@ -111,9 +133,8 @@ class GaussILRMA(ILRMAbase):
         return output
 
     def update_once(self):
-        reference_id = self.reference_id
-
         X = self.input
+        eps = self.eps
 
         self.update_source_model()
         self.update_space_model()
@@ -121,19 +142,24 @@ class GaussILRMA(ILRMAbase):
         W = self.demix_filter
         Y = self.separate(X, demix_filter=W)
         self.estimation = Y
-        """
+        
         if self.normalize:
             T = self.base
             P = np.abs(Y)**2
             aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
+            aux[aux < eps] = eps
+
+            # Normalize
             W = W / aux[np.newaxis,:,np.newaxis]
             Y = Y / aux[:,np.newaxis,np.newaxis]
             if self.partitioning:
-                pass
+                raise NotImplementedError("Not implemented partitioning function.")
             else:
-                pass
-                # self.base = T / aux[:,np.newaxis,np.newaxis]**2
-        """
+                T = T / aux[:,np.newaxis,np.newaxis]**2
+            
+            self.demix_filter = W
+            self.estimation = Y
+            self.base = T
     
     def update_source_model(self):
         eps = self.eps
@@ -153,12 +179,11 @@ class GaussILRMA(ILRMAbase):
         V_transpose = V.transpose(0,2,1)
         TV = T @ V
         TV[TV < eps] = eps
-        division, TV_inverse = P / TV**2, 1 / TV
+        division, TV_inverse = P / (TV**2), 1 / TV
         TVV = TV_inverse @ V_transpose
         TVV[TVV < eps] = eps
         T = T * np.sqrt(division @ V_transpose / TVV)
-        T[T < eps] = eps
-
+        
         # Update activations
         T_transpose = T.transpose(0,2,1)
         TV = T @ V
@@ -167,9 +192,8 @@ class GaussILRMA(ILRMAbase):
         TTV = T_transpose @ TV_inverse
         TTV[TTV < eps] = eps
         V = V * np.sqrt(T_transpose @ division / TTV)
-        V[V < eps] = eps
 
-        self.bases, self.activation = T, V
+        self.base, self.activation = T, V
 
     def update_space_model(self):
         n_sources = self.n_sources
@@ -184,6 +208,7 @@ class GaussILRMA(ILRMAbase):
         X_Hermite = X.transpose(0,1,3,2).conj()
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
         R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+        R[R < eps] = eps
         U = XX / R
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
 
@@ -192,11 +217,12 @@ class GaussILRMA(ILRMAbase):
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
             # TODO: condition number
-            WU_inverse = np.linalg.inv(WU)[...,source_idx] # (n_bins, n_sources, n_channels)
-            w = WU_inverse.conj() # (n_bins, n_channels)
-            wUw = w[:, np.newaxis, :].conj() @ U_n @ w[:, :, np.newaxis]
+            WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
+            w = WU_inverse[...,source_idx] # (n_bins, n_channels)
+            wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
             denominator = np.sqrt(wUw[...,0])
-            W[:, source_idx, :] = w / denominator
+            denominator[denominator < eps] = eps
+            W[:, source_idx, :] = w.conj() / denominator
 
         self.demix_filter = W
 
@@ -235,7 +261,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
     return mixed_signals
 
-def _test():
+def _test(method='Gauss'):
     np.random.seed(111)
     
     # Room impulse response
@@ -261,8 +287,8 @@ def _test():
     n_channels = len(titles)
     iteration = 200
 
-    gauss_ilrma = GaussILRMA(n_bases=n_bases)
-    estimation = gauss_ilrma(mixture, iteration=iteration)
+    ilrma = GaussILRMA(n_bases=n_bases, normalize=True)
+    estimation = ilrma(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
     
@@ -270,7 +296,14 @@ def _test():
 
     for idx in range(n_channels):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/ILRMA/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=sr)
+        write_wav("data/ILRMA/{}/mixture-{}_estimated-iter{}-{}.wav".format(method, sr, iteration, idx), signal=_estimated_signal, sr=sr)
+    
+    plt.figure()
+    plt.plot(ilrma.loss, color='black')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.savefig('data/ILRMA/{}/loss.png'.format(method), bbox_inches='tight')
+    plt.close()
 
 def _test_conv():
     sr = 16000
@@ -297,7 +330,7 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/ILRMA", exist_ok=True)
+    os.makedirs("data/ILRMA/Gauss", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
