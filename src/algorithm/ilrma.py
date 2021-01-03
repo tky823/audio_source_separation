@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.core.defchararray import partition
 
 from algorithm.projection_back import projection_back
 from criterion.divergence import is_divergence
@@ -32,12 +33,16 @@ class ILRMAbase:
 
         W = np.eye(n_sources, n_channels, dtype=np.complex128)
         self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
-        self.base = np.random.rand(n_sources, n_bins, n_bases)
-        self.activation = np.random.rand(n_sources, n_bases, n_frames)
         self.estimation = self.separate(X, demix_filter=W)
 
         if self.partitioning:
-            self.latent = np.ones(n_sources, n_bases) / n_sources
+            self.latent = np.ones((n_sources, n_bases), dtype=np.float64) / n_sources
+            self.base = np.random.rand(n_bins, n_bases)
+            self.activation = np.random.rand(n_bases, n_frames)
+        else:
+            self.base = np.random.rand(n_sources, n_bins, n_bases)
+            self.activation = np.random.rand(n_sources, n_bases, n_frames)
+
         
     def __call__(self, input, iteration=100):
         """
@@ -85,11 +90,11 @@ class ILRMAbase:
         n_frames = self.n_frames
         eps = self.eps
 
-        Y = self.estimation
         W = self.demix_filter
-        T, V = self.base, self.activation
-
+        Y = self.estimation
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        
+        T, V = self.base, self.activation
         R = T @ V # (n_sources, n_bins, n_frames)
         R[R < eps] = eps
         loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
@@ -144,7 +149,6 @@ class GaussILRMA(ILRMAbase):
         self.estimation = Y
         
         if self.normalize:
-            T = self.base
             P = np.abs(Y)**2
             aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
             aux[aux < eps] = eps
@@ -152,14 +156,23 @@ class GaussILRMA(ILRMAbase):
             # Normalize
             W = W / aux[np.newaxis,:,np.newaxis]
             Y = Y / aux[:,np.newaxis,np.newaxis]
+
             if self.partitioning:
-                raise NotImplementedError("Not implemented partitioning function.")
+                Z = self.latent
+                T = self.base
+                Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
+                Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
+                T = T * Zauxsum # (n_bins, n_bases)
+                Z = Zaux / Zauxsum # (n_sources, n_bases)
+                self.latent = Z
+                self.base = T
             else:
-                T = T / aux[:,np.newaxis,np.newaxis]**2
+                T = self.base
+                T = T / (aux[:,np.newaxis,np.newaxis]**2)
+                self.base = T
             
             self.demix_filter = W
             self.estimation = Y
-            self.base = T
     
     def update_source_model(self):
         eps = self.eps
@@ -167,33 +180,68 @@ class GaussILRMA(ILRMAbase):
         X, W = self.input, self.demix_filter
         estimation = self.separate(X, demix_filter=W)
         P = np.abs(estimation)**2
-
-        T, V = self.base, self.activation
-
-        if self.partitioning:
-            Z = self.latent
-
-            raise NotImplementedError("Not support for partitioning function.")
-
-        # Update bases
-        V_transpose = V.transpose(0,2,1)
-        TV = T @ V
-        TV[TV < eps] = eps
-        division, TV_inverse = P / (TV**2), 1 / TV
-        TVV = TV_inverse @ V_transpose
-        TVV[TVV < eps] = eps
-        T = T * np.sqrt(division @ V_transpose / TVV)
         
-        # Update activations
-        T_transpose = T.transpose(0,2,1)
-        TV = T @ V
-        TV[TV < eps] = eps
-        division, TV_inverse = P / (TV**2), 1 / TV
-        TTV = T_transpose @ TV_inverse
-        TTV[TTV < eps] = eps
-        V = V * np.sqrt(T_transpose @ division / TTV)
+        if self.partitioning:
+            Z = self.latent # (n_sources, n_bases)
+            T, V = self.base, self.activation
 
-        self.base, self.activation = T, V
+            TV = T[:,:,np.newaxis] * V[np.newaxis,:,:] # (n_bins, n_bases, n_frames)
+            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
+            ZTV = ZT @ V[np.newaxis,:,:] # (n_sources, n_bins, n_frames)
+            ZTV[ZTV < eps] = eps
+            division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
+            numerator = np.sum(division[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_bases)
+            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_bases)
+            denominator[denominator < eps] = eps
+            Z = np.sqrt(numerator / denominator) # (n_sources, n_bases)
+            Z = Z / Z.sum(axis=0) # (n_sources, n_bases)
+
+            # Update bases
+            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
+            ZTV = ZT @ V[np.newaxis,:,:] # (n_sources, n_bins, n_frames)
+            ZTV[ZTV < eps] = eps
+            division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
+            ZV = Z[:,:,np.newaxis] * V[np.newaxis,:,:] # (n_sources, n_bases, n_frames)
+            numerator = np.sum(division[:,:,np.newaxis,:] * ZV[:,np.newaxis,:,:], axis=(0,3)) # (n_bins, n_bases)
+            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:] * ZV[:,np.newaxis,:,:], axis=(0,3)) # (n_bins, n_bases)
+            denominator[denominator < eps] = eps
+            T = T * np.sqrt(numerator / denominator) # (n_bins, n_bases)
+
+            # Update activations
+            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
+            ZTV = ZT @ V[np.newaxis,:,:] # (n_sources, n_bins, n_frames)
+            ZTV[ZTV < eps] = eps
+            division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
+            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
+            numerator = np.sum(division[:,:,np.newaxis,:] * ZT[:,:,:,np.newaxis], axis=(0,1)) # (n_bases, n_frames)
+            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:] * ZT[:,:,:,np.newaxis], axis=(0,1)) # (n_bases, n_frames)
+            denominator[denominator < eps] = eps
+            V = V * np.sqrt(numerator / denominator) # (n_bins, n_bases)
+
+            self.latent = Z
+            self.base, self.activation = T, V
+        else:
+            T, V = self.base, self.activation
+
+            # Update bases
+            V_transpose = V.transpose(0,2,1)
+            TV = T @ V
+            TV[TV < eps] = eps
+            division, TV_inverse = P / (TV**2), 1 / TV
+            TVV = TV_inverse @ V_transpose
+            TVV[TVV < eps] = eps
+            T = T * np.sqrt(division @ V_transpose / TVV)
+            
+            # Update activations
+            T_transpose = T.transpose(0,2,1)
+            TV = T @ V
+            TV[TV < eps] = eps
+            division, TV_inverse = P / (TV**2), 1 / TV
+            TTV = T_transpose @ TV_inverse
+            TTV[TTV < eps] = eps
+            V = V * np.sqrt(T_transpose @ division / TTV)
+
+            self.base, self.activation = T, V
 
     def update_space_model(self):
         n_sources = self.n_sources
@@ -201,14 +249,22 @@ class GaussILRMA(ILRMAbase):
         eps = self.eps
 
         X, W = self.input, self.demix_filter
-        TV = self.base @ self.activation
         
+        if self.partitioning:
+            Z = self.latent
+            T, V = self.base, self.activation
+            ZTV = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
+            R = ZTV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+        else:
+            T, V = self.base, self.activation
+            TV = T @ V
+            R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+        R[R < eps] = eps
+
         X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
         X = X[...,np.newaxis]
         X_Hermite = X.transpose(0,1,3,2).conj()
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
-        R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
-        R[R < eps] = eps
         U = XX / R
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
 
@@ -225,6 +281,28 @@ class GaussILRMA(ILRMAbase):
             W[:, source_idx, :] = w.conj() / denominator
 
         self.demix_filter = W
+
+    def compute_negative_loglikelihood(self):
+        n_frames = self.n_frames
+        eps = self.eps
+
+        W = self.demix_filter
+        Y = self.estimation
+
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+
+        if self.partitioning:
+            Z = self.latent
+            T, V = self.base, self.activation
+            R = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
+        else:
+            T, V = self.base, self.activation
+            R = T @ V # (n_sources, n_bins, n_frames)
+        
+        R[R < eps] = eps
+        loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
+
+        return loss
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
@@ -261,7 +339,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
     return mixed_signals
 
-def _test(method='Gauss'):
+def _test(method='Gauss', n_bases=10, partitioning=False):
     np.random.seed(111)
     
     # Room impulse response
@@ -283,11 +361,10 @@ def _test(method='Gauss'):
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # ILRMA
-    n_bases = 10
     n_channels = len(titles)
     iteration = 200
 
-    ilrma = GaussILRMA(n_bases=n_bases, normalize=True)
+    ilrma = GaussILRMA(n_bases=n_bases, partitioning=partitioning)
     estimation = ilrma(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
@@ -296,13 +373,13 @@ def _test(method='Gauss'):
 
     for idx in range(n_channels):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/ILRMA/{}/mixture-{}_estimated-iter{}-{}.wav".format(method, sr, iteration, idx), signal=_estimated_signal, sr=sr)
+        write_wav("data/ILRMA/{}/partitioning{}/mixture-{}_estimated-iter{}-{}.wav".format(method, int(partitioning), sr, iteration, idx), signal=_estimated_signal, sr=sr)
     
     plt.figure()
     plt.plot(ilrma.loss, color='black')
     plt.xlabel('Iteration')
     plt.ylabel('Loss')
-    plt.savefig('data/ILRMA/{}/loss.png'.format(method), bbox_inches='tight')
+    plt.savefig('data/ILRMA/{}/partitioning{}/loss.png'.format(method, int(partitioning)), bbox_inches='tight')
     plt.close()
 
 def _test_conv():
@@ -330,7 +407,8 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/ILRMA/Gauss", exist_ok=True)
+    os.makedirs("data/ILRMA/Gauss/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/Gauss/partitioning1", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
@@ -338,4 +416,5 @@ if __name__ == '__main__':
     """
 
     # _test_conv()
-    _test()
+    # _test(n_bases=2, partitioning=False)
+    _test(n_bases=5, partitioning=True)
