@@ -1,7 +1,6 @@
 import numpy as np
 
 from algorithm.projection_back import projection_back
-from criterion.divergence import is_divergence
 
 EPS=1e-12
 
