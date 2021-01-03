@@ -14,7 +14,6 @@ class ILRMAbase:
 
         self.partitioning = partitioning
         self.normalize = normalize
-        
     
     def _reset(self):
         assert self.input is not None, "Specify data!"
@@ -40,7 +39,6 @@ class ILRMAbase:
         else:
             self.base = np.random.rand(n_sources, n_bins, n_bases)
             self.activation = np.random.rand(n_sources, n_bases, n_frames)
-
         
     def __call__(self, input, iteration=100):
         """
@@ -85,19 +83,7 @@ class ILRMAbase:
         return output
     
     def compute_negative_loglikelihood(self):
-        n_frames = self.n_frames
-        eps = self.eps
-
-        W = self.demix_filter
-        Y = self.estimation
-        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
-        
-        T, V = self.base, self.activation
-        R = T @ V # (n_sources, n_bins, n_frames)
-        R[R < eps] = eps
-        loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
-
-        return loss
+        raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
 class GaussILRMA(ILRMAbase):
     def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
@@ -301,6 +287,88 @@ class GaussILRMA(ILRMAbase):
         loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
 
         return loss
+
+class tILRMA(ILRMAbase):
+    """
+    Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation
+    """
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
+
+        self.reference_id = reference_id
+
+        raise NotImplementedError("Implement t-ILRMA")
+    
+    def __call__(self, input, iteration=100):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset()
+
+        for idx in range(iteration):
+            self.update_once()
+
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
+            if self.callback is not None:
+                self.callback(self)
+        
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        self.estimation = output
+
+        return output
+
+class KLILRMA(ILRMAbase):
+    """
+    Independent Low-Rank Matrix Analysis Based on Generalized Kullback-Leibler Divergence
+    """
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
+
+        self.reference_id = reference_id
+
+        raise NotImplementedError("Implement KL-ILRMA")
+    
+    def __call__(self, input, iteration=100):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset()
+
+        for idx in range(iteration):
+            self.update_once()
+
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
+            if self.callback is not None:
+                self.callback(self)
+        
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        self.estimation = output
+
+        return output
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
