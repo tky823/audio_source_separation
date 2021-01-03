@@ -19,7 +19,7 @@ def projection_back(Y, reference):
         Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
         YY_Hermite_inverse = np.linalg.inv(Y @ Y_Hermite) # (n_bins, n_sources, n_sources)
         A = X @ Y_Hermite @ YY_Hermite_inverse # (n_bins, n_channels, n_sources)
-        scale = A.transpose(1,0) # (n_sources, n_bins)
+        scale = A[:,0,:].transpose(1,0) # (n_sources, n_bins)
     elif n_dims == 3:
         # Y: (n_channels, n_bins, n_frames)
         # X: (n_sources, n_bins, n_frames)
