@@ -17,8 +17,7 @@ def projection_back(Y, reference):
         X = reference[:,np.newaxis,:] # (n_bins, 1, n_frames)
         Y = Y.transpose(1,0,2) # (n_bins, n_channels, n_frames)
         Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
-        YY_Hermite = Y @ Y_Hermite # (n_bins, n_channels, n_channels)
-        YY_Hermite_inverse = np.linalg.inv(YY_Hermite)# (n_bins, n_channels, n_channels)
+        YY_Hermite_inverse = np.linalg.inv(Y @ Y_Hermite)# (n_bins, n_channels, n_channels)
         A = X @ Y_Hermite @ YY_Hermite_inverse # (n_bins, 1, n_channels)
         scale = A.squeeze().transpose(1,0) # (n_channels, n_bins)
     elif n_dims == 3:
@@ -27,8 +26,7 @@ def projection_back(Y, reference):
         X = reference.transpose(1,0,2) # (n_bins, n_sources, n_frames)
         Y = Y.transpose(1,0,2) # (n_bins, n_channels, n_frames)
         Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
-        YY_Hermite = Y @ Y_Hermite # (n_bins, n_channels, n_channels)
-        YY_Hermite_inverse = np.linalg.inv(YY_Hermite)# (n_bins, n_channels, n_channels)
+        YY_Hermite_inverse = np.linalg.inv(Y @ Y_Hermite)# (n_bins, n_channels, n_channels)
         A = X @ Y_Hermite @ YY_Hermite_inverse # (n_bins, n_sources, n_channels)
         scale = A.transpose(1,2,0) # (n_sources, n_channels, n_bins)
     else:
