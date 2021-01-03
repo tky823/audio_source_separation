@@ -113,17 +113,7 @@ class GradIVA(IVAbase):
         Y = self.separate(X, demix_filter=W)
 
         scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
-
-        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
-        XX_inverse = np.linalg.inv(X @ X_Hermite)
-        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-
-        X, W = input, self.demix_filter
-        output = self.separate(X, demix_filter=W)
-
+        output = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
@@ -232,17 +222,7 @@ class AuxIVA(IVAbase):
         Y = self.separate(X, demix_filter=W)
 
         scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
-
-        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
-        XX_inverse = np.linalg.inv(X @ X_Hermite)
-        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-
-        X, W = input, self.demix_filter
-        output = self.separate(X, demix_filter=W)
-
+        output = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
@@ -274,7 +254,6 @@ class AuxIVA(IVAbase):
             wUw = w[:, np.newaxis, :].conj() @ U_n @ w[:, :, np.newaxis]
             denominator = np.sqrt(wUw[...,0])
             W[:, source_idx, :] = w / denominator
-
         
         self.demix_filter = W
 
