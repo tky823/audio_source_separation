@@ -19,7 +19,7 @@ def projection_back(Y, reference):
         Y_Hermite = Y.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
         YY_Hermite = Y @ Y_Hermite # (n_bins, n_channels, n_channels)
         YY_Hermite_inverse = np.linalg.inv(YY_Hermite)# (n_bins, n_channels, n_channels)
-        A = X[:,np.newaxis,:] @ Y_Hermite @ YY_Hermite_inverse # (n_bins, 1, n_channels)
+        A = X @ Y_Hermite @ YY_Hermite_inverse # (n_bins, 1, n_channels)
         scale = A.squeeze().transpose(1,0) # (n_channels, n_bins)
     elif n_dims == 3:
         # Y: (n_channels, n_bins, n_frames)
@@ -30,7 +30,7 @@ def projection_back(Y, reference):
         YY_Hermite = Y @ Y_Hermite # (n_bins, n_channels, n_channels)
         YY_Hermite_inverse = np.linalg.inv(YY_Hermite)# (n_bins, n_channels, n_channels)
         A = X @ Y_Hermite @ YY_Hermite_inverse # (n_bins, n_sources, n_channels)
-        scale = A.transpose(1,2,0)
+        scale = A.transpose(1,2,0) # (n_sources, n_channels, n_bins)
     else:
         raise ValueError("reference.ndim is expected 2 or 3, but given {}.".format(n_dims))
 
