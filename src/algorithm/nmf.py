@@ -127,7 +127,7 @@ class ISNMF(NMFbase):
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
-        division, TV_inverse = target / TV**2, 1 / TV
+        division, TV_inverse = target / (TV**2), 1 / TV
         TVV = TV_inverse @ V_transpose
         TVV[TVV < eps] = eps
         T = T * np.sqrt(division @ V_transpose / TVV)
