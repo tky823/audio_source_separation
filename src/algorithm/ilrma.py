@@ -76,24 +76,6 @@ class ILRMAbase:
         output = estimation.transpose(1,0,2)
 
         return output
-    
-    """
-    def projection_back(self, estimation, demix_filter, reference_id=0):
-        n_sources = self.n_sources
-
-        W = demix_filter
-        W_inverse = np.linalg.inv(W)
-
-        Y = estimation.transpose(2,1,0)
-        # TODO: It seems waste of time. Use np.einsum() instead?
-        indices = np.arange(n_sources)
-        Y_expand = np.zeros(Y.shape + (n_sources,), dtype=np.complex128)
-        Y_expand[:,:,indices,indices] = Y
-        Y_hat = W_inverse @ Y_expand
-        Y_hat = Y_hat[:,:,reference_id,:].transpose(2,1,0)
-
-        return Y_hat
-    """
 
 class GaussILRMA(ILRMAbase):
     def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
@@ -119,20 +101,11 @@ class GaussILRMA(ILRMAbase):
                 self.callback(self)
         
         reference_id = self.reference_id
-        W = self.demix_filter
-        X = self.input
-        Y = self.separate(X, demix_filter=W)
-        
-        scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
-        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
-        XX_inverse = np.linalg.inv(X @ X_Hermite)
-        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-        
         X, W = input, self.demix_filter
-        output = self.separate(X, demix_filter=W)
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
@@ -160,21 +133,6 @@ class GaussILRMA(ILRMAbase):
             else:
                 pass
                 # self.base = T / aux[:,np.newaxis,np.newaxis]**2
-        """
-        """
-        scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
-        """
-        """
-        Y_hat = self.projection_back(Y, demix_filter=W, reference_id=reference_id)
-        """
-        """
-        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
-        XX_inverse = np.linalg.inv(X @ X_Hermite)
-        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-        self.estimation = Y_hat.transpose(1,0,2)
         """
     
     def update_source_model(self):
