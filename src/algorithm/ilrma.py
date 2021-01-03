@@ -415,5 +415,5 @@ if __name__ == '__main__':
     """
 
     # _test_conv()
-    # _test(n_bases=2, partitioning=False)
+    _test(n_bases=2, partitioning=False)
     _test(n_bases=5, partitioning=True)
