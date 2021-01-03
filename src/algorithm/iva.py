@@ -113,7 +113,7 @@ class GradIVA(IVAbase):
         Y = self.separate(X, demix_filter=W)
 
         scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
@@ -222,7 +222,7 @@ class AuxIVA(IVAbase):
         Y = self.separate(X, demix_filter=W)
 
         scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
