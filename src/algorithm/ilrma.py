@@ -101,20 +101,11 @@ class GaussILRMA(ILRMAbase):
                 self.callback(self)
         
         reference_id = self.reference_id
-        W = self.demix_filter
-        X = self.input
-        Y = self.separate(X, demix_filter=W)
-        
-        scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
-        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
-        XX_inverse = np.linalg.inv(X @ X_Hermite)
-        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-        
         X, W = input, self.demix_filter
-        output = self.separate(X, demix_filter=W)
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
@@ -142,19 +133,6 @@ class GaussILRMA(ILRMAbase):
             else:
                 pass
                 # self.base = T / aux[:,np.newaxis,np.newaxis]**2
-        """
-        """
-        scale = projection_back(Y, reference=X[reference_id])
-        Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
-        """
-        
-        """
-        Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-        X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_sources)
-        XX_inverse = np.linalg.inv(X @ X_Hermite)
-        self.demix_filter = Y_hat @ X_Hermite @ XX_inverse
-        self.estimation = Y_hat.transpose(1,0,2)
         """
     
     def update_source_model(self):
