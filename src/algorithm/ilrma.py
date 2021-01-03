@@ -76,24 +76,6 @@ class ILRMAbase:
         output = estimation.transpose(1,0,2)
 
         return output
-    
-    """
-    def projection_back(self, estimation, demix_filter, reference_id=0):
-        n_sources = self.n_sources
-
-        W = demix_filter
-        W_inverse = np.linalg.inv(W)
-
-        Y = estimation.transpose(2,1,0)
-        # TODO: It seems waste of time. Use np.einsum() instead?
-        indices = np.arange(n_sources)
-        Y_expand = np.zeros(Y.shape + (n_sources,), dtype=np.complex128)
-        Y_expand[:,:,indices,indices] = Y
-        Y_hat = W_inverse @ Y_expand
-        Y_hat = Y_hat[:,:,reference_id,:].transpose(2,1,0)
-
-        return Y_hat
-    """
 
 class GaussILRMA(ILRMAbase):
     def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
@@ -165,9 +147,7 @@ class GaussILRMA(ILRMAbase):
         scale = projection_back(Y, reference=X[reference_id])
         Y_hat = Y * scale[...,np.newaxis].conj() # (n_sources, n_bins, n_frames)
         """
-        """
-        Y_hat = self.projection_back(Y, demix_filter=W, reference_id=reference_id)
-        """
+        
         """
         Y_hat = Y_hat.transpose(1,0,2) # (n_bins, n_sources, n_frames)
         X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
