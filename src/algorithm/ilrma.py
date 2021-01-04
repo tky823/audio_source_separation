@@ -370,6 +370,11 @@ class KLILRMA(ILRMAbase):
 
         return output
 
+"""
+"Blind source separation based on independent low-rank matrix analysis with sparse regularization for time-series activity"
+"""
+# TODO
+
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
 
