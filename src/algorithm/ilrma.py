@@ -3,6 +3,7 @@ import numpy as np
 from algorithm.projection_back import projection_back
 
 EPS=1e-12
+THRESHOLD_COND=1e12
 
 class ILRMAbase:
     """
@@ -93,13 +94,14 @@ class GaussILRMA(ILRMAbase):
     Reference: "Determined Blind Source Separation Unifying Independent Vector Analysis and Nonnegative Matrix Factorization"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS, threshold_cond=THRESHOLD_COND):
         """
         Args:
         """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
         self.reference_id = reference_id
+        self.threshold_cond = threshold_cond
 
         # TODO: domain
     
@@ -241,6 +243,7 @@ class GaussILRMA(ILRMAbase):
     def update_space_model(self):
         n_sources = self.n_sources
         eps = self.eps
+        threshold_cond = self.threshold_cond
 
         X, W = self.input, self.demix_filter
         
@@ -267,14 +270,13 @@ class GaussILRMA(ILRMAbase):
             # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
-            # TODO: condition number
-            print(np.max(np.linalg.cond(WU)))
+            cond_stable = np.linalg.cond(WU) < threshold_cond
             WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
             w = WU_inverse[...,source_idx] # (n_bins, n_channels)
             wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
             denominator = np.sqrt(wUw[...,0])
             denominator[denominator < eps] = eps
-            W[:, source_idx, :] = w.conj() / denominator
+            W[:, source_idx, :] = cond_stable[:,np.newaxis] * (w.conj() / denominator)
 
         self.demix_filter = W
 
@@ -305,7 +307,7 @@ class tILRMA(ILRMAbase):
     Reference: "Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation"
     See: https://ieeexplore.ieee.org/document/8168129
     """
-    def __init__(self, n_bases=10, nu=1.0, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, nu=1.0, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS, threshold_cond=THRESHOLD_COND):
         """
         Args:
             nu: degree of freedom. nu = 1: Cauchy distribution, nu -> infty: Gaussian distribution.
@@ -314,6 +316,7 @@ class tILRMA(ILRMAbase):
 
         self.nu = nu
         self.reference_id = reference_id
+        self.threshold_cond = threshold_cond
 
         # TODO: domain
     
@@ -460,6 +463,7 @@ class tILRMA(ILRMAbase):
         n_sources = self.n_sources
         nu = self.nu
         eps = self.eps
+        threshold_cond = self.threshold_cond
 
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
@@ -490,13 +494,13 @@ class tILRMA(ILRMAbase):
             # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
-            # TODO: condition number
+            cond_stable = np.linalg.cond(WU) < threshold_cond
             WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
             w = WU_inverse[...,source_idx] # (n_bins, n_channels)
             wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
             denominator = np.sqrt(wUw[...,0])
             denominator[denominator < eps] = eps
-            W[:, source_idx, :] = w.conj() / denominator
+            W[:, source_idx, :] = cond_stable[:,np.newaxis] * (w.conj() / denominator)
 
         self.demix_filter = W
 
