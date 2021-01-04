@@ -189,8 +189,7 @@ class GaussILRMA(ILRMAbase):
             denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_bases)
             denominator[denominator < eps] = eps
             Z = np.sqrt(numerator / denominator) # (n_sources, n_bases)
-            Zsum = Z.sum(axis=0)
-            Z = Z / Zsum # (n_sources, n_bases)
+            Z = Z / Z.sum(axis=0) # (n_sources, n_bases)
 
             # Update bases
             ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
@@ -269,6 +268,7 @@ class GaussILRMA(ILRMAbase):
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
             # TODO: condition number
+            print(np.max(np.linalg.cond(WU)))
             WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
             w = WU_inverse[...,source_idx] # (n_bins, n_channels)
             wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
