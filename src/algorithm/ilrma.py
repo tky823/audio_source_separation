@@ -86,9 +86,14 @@ class ILRMAbase:
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
 class GaussILRMA(ILRMAbase):
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, domain=2.0, reference_id=0, callback=None, eps=EPS):
+        """
+        Args:
+            domain <float>: domain parameter. 1 is amplitude domain, 2 is power domain.
+        """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
+        self.domain = domain
         self.reference_id = reference_id
     
     def __call__(self, input, iteration=100):
@@ -159,11 +164,12 @@ class GaussILRMA(ILRMAbase):
             self.estimation = Y
     
     def update_source_model(self):
+        domain = self.domain
         eps = self.eps
 
         X, W = self.input, self.demix_filter
         estimation = self.separate(X, demix_filter=W)
-        P = np.abs(estimation)**2
+        P = np.abs(estimation)**(domain/2)
         
         if self.partitioning:
             Z = self.latent # (n_sources, n_bases)
@@ -178,7 +184,8 @@ class GaussILRMA(ILRMAbase):
             denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_bases)
             denominator[denominator < eps] = eps
             Z = np.sqrt(numerator / denominator) # (n_sources, n_bases)
-            Z = Z / Z.sum(axis=0) # (n_sources, n_bases)
+            Zsum = Z.sum(axis=0)
+            Z = Z / Zsum # (n_sources, n_bases)
 
             # Update bases
             ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
@@ -229,7 +236,7 @@ class GaussILRMA(ILRMAbase):
 
     def update_space_model(self):
         n_sources = self.n_sources
-        n_bins = self.n_bins
+        domain = self.domain
         eps = self.eps
 
         X, W = self.input, self.demix_filter
@@ -244,6 +251,7 @@ class GaussILRMA(ILRMAbase):
             TV = T @ V
             R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
         R[R < eps] = eps
+        R = R**(2 / domain)
 
         X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
         X = X[...,np.newaxis]
@@ -253,7 +261,7 @@ class GaussILRMA(ILRMAbase):
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
 
         for source_idx in range(n_sources):
-            # W: (n_bins, n_sources, n_channels), U: (N, n_bins, n_channels, n_channels)
+            # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
             # TODO: condition number
@@ -268,6 +276,7 @@ class GaussILRMA(ILRMAbase):
 
     def compute_negative_loglikelihood(self):
         n_frames = self.n_frames
+        domain = self.domain
         eps = self.eps
 
         W = self.demix_filter
@@ -282,7 +291,7 @@ class GaussILRMA(ILRMAbase):
         else:
             T, V = self.base, self.activation
             R = T @ V # (n_sources, n_bins, n_frames)
-        
+        R = R**(2 / domain)
         R[R < eps] = eps
         loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
 
@@ -292,7 +301,7 @@ class tILRMA(ILRMAbase):
     """
     Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, domain=2.0, reference_id=0, callback=None, eps=EPS):
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
         self.reference_id = reference_id
@@ -435,7 +444,7 @@ def _test(method='Gauss', n_bases=10, partitioning=False):
     n_channels = len(titles)
     iteration = 200
 
-    ilrma = GaussILRMA(n_bases=n_bases, partitioning=partitioning)
+    ilrma = GaussILRMA(n_bases=n_bases, partitioning=partitioning, domain=2.0)
     estimation = ilrma(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
