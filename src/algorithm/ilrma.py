@@ -93,17 +93,14 @@ class GaussILRMA(ILRMAbase):
     Reference: "Determined Blind Source Separation Unifying Independent Vector Analysis and Nonnegative Matrix Factorization"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, domain=2.0, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
         """
         Args:
-            domain <float>: domain parameter. 1 is amplitude domain, 2 is power domain.
         """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
-        self.domain = domain
         self.reference_id = reference_id
 
-        assert self.domain == 2, "Support only power domain."
         # TODO: domain
     
     def __call__(self, input, iteration=100):
@@ -137,19 +134,17 @@ class GaussILRMA(ILRMAbase):
         return output
 
     def update_once(self):
-        X = self.input
-        domain = self.domain
         eps = self.eps
 
         self.update_source_model()
         self.update_space_model()
 
-        W = self.demix_filter
+        X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
         self.estimation = Y
         
         if self.normalize:
-            P = np.abs(Y)**domain
+            P = np.abs(Y)**2
             aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
             aux[aux < eps] = eps
 
@@ -175,12 +170,11 @@ class GaussILRMA(ILRMAbase):
             self.estimation = Y
     
     def update_source_model(self):
-        domain = self.domain
         eps = self.eps
 
         X, W = self.input, self.demix_filter
-        estimation = self.separate(X, demix_filter=W)
-        P = np.abs(estimation)**domain
+        Y = self.separate(X, demix_filter=W)
+        P = np.abs(Y)**2
         
         if self.partitioning:
             Z = self.latent # (n_sources, n_bases)
@@ -247,7 +241,6 @@ class GaussILRMA(ILRMAbase):
 
     def update_space_model(self):
         n_sources = self.n_sources
-        domain = self.domain
         eps = self.eps
 
         X, W = self.input, self.demix_filter
@@ -262,7 +255,6 @@ class GaussILRMA(ILRMAbase):
             TV = T @ V
             R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
         
-        R = R**(2 / domain)
         R[R < eps] = eps
 
         X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
@@ -288,11 +280,10 @@ class GaussILRMA(ILRMAbase):
 
     def compute_negative_loglikelihood(self):
         n_frames = self.n_frames
-        domain = self.domain
         eps = self.eps
 
-        W = self.demix_filter
-        Y = self.estimation
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
 
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
 
@@ -303,7 +294,7 @@ class GaussILRMA(ILRMAbase):
         else:
             T, V = self.base, self.activation
             R = T @ V # (n_sources, n_bins, n_frames)
-        R = R**(2 / domain)
+        
         R[R < eps] = eps
         loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
 
@@ -314,19 +305,16 @@ class tILRMA(ILRMAbase):
     Reference: "Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation"
     See: https://ieeexplore.ieee.org/document/8168129
     """
-    def __init__(self, n_bases=10, nu=1.0, partitioning=False, normalize=True, domain=2.0, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, nu=1.0, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
         """
         Args:
             nu: degree of freedom. nu = 1: Cauchy distribution, nu -> infty: Gaussian distribution.
-            domain <float>: domain parameter. 1 is amplitude domain, 2 is power domain.
         """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
-        self.domain = domain
         self.nu = nu
         self.reference_id = reference_id
 
-        assert self.domain == 2, "Support only power domain."
         # TODO: domain
     
     def __call__(self, input, iteration=100):
@@ -360,19 +348,17 @@ class tILRMA(ILRMAbase):
         return output
     
     def update_once(self):
-        X = self.input
-        domain = self.domain
         eps = self.eps
 
         # self.update_source_model()
         self.update_space_model()
 
-        W = self.demix_filter
+        X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
         self.estimation = Y
         
         if self.normalize:
-            P = np.abs(Y)**domain
+            P = np.abs(Y)**2
             aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
             aux[aux < eps] = eps
 
@@ -398,12 +384,11 @@ class tILRMA(ILRMAbase):
             self.estimation = Y
 
     def update_source_model(self):
-        domain = self.domain
         eps = self.eps
 
         X, W = self.input, self.demix_filter
-        estimation = self.separate(X, demix_filter=W)
-        P = np.abs(estimation)**domain
+        Y = self.separate(X, demix_filter=W)
+        P = np.abs(Y)**2
 
         raise NotImplementedError("Implement update_source_model.")
         
@@ -473,7 +458,6 @@ class tILRMA(ILRMAbase):
     
     def update_space_model(self):
         n_sources = self.n_sources
-        domain = self.domain
         nu = self.nu
         eps = self.eps
 
@@ -492,7 +476,6 @@ class tILRMA(ILRMAbase):
             TV = T @ V
             R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
         
-        R = R**(2 / domain)
         R[R < eps] = eps
         Xi = (nu * R + 2 * P[..., np.newaxis, np.newaxis]) / (nu + 2)
 
@@ -519,7 +502,6 @@ class tILRMA(ILRMAbase):
 
     def compute_negative_loglikelihood(self):
         n_frames = self.n_frames
-        domain = self.domain
         nu = self.nu
         eps = self.eps
 
@@ -535,7 +517,7 @@ class tILRMA(ILRMAbase):
         else:
             T, V = self.base, self.activation
             R = T @ V # (n_sources, n_bins, n_frames)
-        R = R**(2 / domain)
+        
         R[R < eps] = eps
         loss = np.sum((1 + nu / 2) * np.log(1 + (2 / nu) * (P / R)) + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
 
@@ -587,15 +569,14 @@ class RegularizedILRMA(ILRMAbase):
     Reference: "Blind source separation based on independent low-rank matrix analysis with sparse regularization for time-series activity"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, domain=2.0, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
         """
         Args:
-            domain <float>: domain parameter. 1 is amplitude domain, 2 is power domain.
+
         """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
-        self.domain = domain
         self.reference_id = reference_id
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
@@ -659,9 +640,9 @@ def _test(method, n_bases=10, partitioning=False):
     iteration = 200
 
     if method == 'Gauss':
-        ilrma = GaussILRMA(n_bases=n_bases, partitioning=partitioning, domain=2.0)
+        ilrma = GaussILRMA(n_bases=n_bases, partitioning=partitioning)
     elif method == 't':
-        ilrma = tILRMA(n_bases=n_bases, partitioning=partitioning, domain=2.0)
+        ilrma = tILRMA(n_bases=n_bases, partitioning=partitioning)
     else:
         raise ValueError("Not support {}-ILRMA.".format(method))
     estimation = ilrma(mixture, iteration=iteration)
