@@ -271,7 +271,7 @@ class GaussILRMA(ILRMAbase):
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
             cond_stable = np.linalg.cond(WU) < threshold_cond
-            WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
+            WU_inverse = np.linalg.pinv(WU) # (n_bins, n_sources, n_channels)
             w = WU_inverse[...,source_idx] # (n_bins, n_channels)
             wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
             denominator = np.sqrt(wUw[...,0])
@@ -495,7 +495,7 @@ class tILRMA(ILRMAbase):
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
             cond_stable = np.linalg.cond(WU) < threshold_cond
-            WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
+            WU_inverse = np.linalg.pinv(WU) # (n_bins, n_sources, n_channels)
             w = WU_inverse[...,source_idx] # (n_bins, n_channels)
             wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
             denominator = np.sqrt(wUw[...,0])
