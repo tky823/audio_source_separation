@@ -263,8 +263,6 @@ class GaussILRMA(ILRMAbase):
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
         U = XX / R
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
-        E = np.eye(n_sources)
-        E = np.tile(E, reps=(n_bins, 1, 1))
 
         for source_idx in range(n_sources):
             # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
