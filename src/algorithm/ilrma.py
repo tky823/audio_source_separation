@@ -146,7 +146,7 @@ class GaussILRMA(ILRMAbase):
         if self.normalize:
             P = np.abs(Y)**2
             aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
-            aux[aux < eps] = eps
+            # aux[aux < eps] = eps
 
             # Normalize
             W = W / aux[np.newaxis,:,np.newaxis]
