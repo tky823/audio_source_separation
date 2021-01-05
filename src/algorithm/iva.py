@@ -190,10 +190,9 @@ class NaturalGradIVA(GradIVA):
 
 
 class AuxIVA(IVAbase):
-    def __init__(self, normalize=True, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, reference_id=0, callback=None, eps=EPS):
         super().__init__(callback=callback, eps=eps)
 
-        self.normalize = normalize
         self.reference_id = reference_id
     
     def __call__(self, input, iteration=100):
@@ -262,18 +261,6 @@ class AuxIVA(IVAbase):
         Y = self.separate(X, demix_filter=W)
         
         self.estimation = Y
-
-        if self.normalize:
-            P = np.abs(Y)**2
-            aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
-            aux[aux < eps] = eps
-
-            # Normalize
-            W = W / aux[np.newaxis,:,np.newaxis]
-            Y = Y / aux[:,np.newaxis,np.newaxis]
-            
-            self.demix_filter = W
-            self.estimation = Y
 
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
