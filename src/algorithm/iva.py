@@ -3,6 +3,7 @@ import numpy as np
 from algorithm.projection_back import projection_back
 
 EPS=1e-12
+THRESHOLD=1e+12
 
 class IVAbase:
     def __init__(self, callback=None, eps=EPS):
@@ -190,10 +191,11 @@ class NaturalGradIVA(GradIVA):
 
 
 class AuxIVA(IVAbase):
-    def __init__(self, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
         super().__init__(callback=callback, eps=eps)
 
         self.reference_id = reference_id
+        self.threshold = threshold
     
     def __call__(self, input, iteration=100):
         """
@@ -228,9 +230,9 @@ class AuxIVA(IVAbase):
         return output
     
     def update_once(self):
-        n_sources = self.n_sources
+        n_sources, n_channels = self.n_sources, self.n_channels
         n_bins = self.n_bins
-        eps = self.eps
+        eps, threshold = self.eps, self.threshold
 
         X, W = self.input, self.demix_filter
         Y = self.estimation
@@ -243,17 +245,23 @@ class AuxIVA(IVAbase):
         R = np.sqrt(P.sum(axis=1))[:,np.newaxis,:,np.newaxis,np.newaxis] # (n_sources, 1, n_frames, 1, 1)
         U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
+        E = np.eye(n_sources, n_channels)
+        E = np.tile(E, reps=(n_bins,1,1)) # (n_bins, n_sources, n_channels)
 
         for source_idx in range(n_sources):
-            # W: (n_bins, n_sources, n_channels), U: (N, n_bins, n_channels, n_channels)
+            # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
+            w_n_Hermite = W[:,source_idx,:] # (n_bins, n_channels)
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
-            # TODO: condition number
-            WU_inverse = np.linalg.inv(WU)[...,source_idx] # (n_bins, n_sources, n_channels)
-            w = WU_inverse.conj() # (n_bins, n_channels)
-            wUw = w[:, np.newaxis, :].conj() @ U_n @ w[:, :, np.newaxis]
+            condition = np.linalg.cond(WU) < threshold # (n_bins,)
+            condition = condition[:,np.newaxis] # (n_bins, 1)
+            e_n = E[:,source_idx,:]
+            w_n = np.linalg.solve(WU, e_n)
+            wUw = w_n[:,np.newaxis,:].conj() @ U_n @ w_n[:,:,np.newaxis]
             denominator = np.sqrt(wUw[...,0])
-            W[:, source_idx, :] = w / denominator
+            w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
+            # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
+            W[:,source_idx,:] = w_n_Hermite
         
         self.demix_filter = W
 
