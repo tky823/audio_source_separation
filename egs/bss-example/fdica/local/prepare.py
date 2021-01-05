@@ -5,7 +5,7 @@ import argparse
 import os
 import numpy as np
 from scipy.io import loadmat
-import librosa
+import soundfile as sf
 
 parser = argparse.ArgumentParser(description="Example of frequency-domain ICA (FDICA)")
 
@@ -24,7 +24,7 @@ def main(args):
     # Resample
     for idx, title in enumerate(titles):
         path = os.path.join(data_root, "cmu_us_{}_arctic/wav/arctic_a{:04d}.wav".format(title, idx+1))
-        source, sr = librosa.load(path, target_sr)
+        source, sr = sf.read(path)
         T = len(source)
 
         if T_min is None or T < T_min:
@@ -32,12 +32,12 @@ def main(args):
     
     for idx, title in enumerate(titles):
         path = os.path.join(data_root, "cmu_us_{}_arctic/wav/arctic_a{:04d}.wav".format(title, idx+1))
-        source, sr = librosa.load(path, target_sr)
+        source, sr = sf.read(path)
 
         path = os.path.join(data_root, "cmu_us_{}_arctic/trimmed".format(title))
         os.makedirs(path, exist_ok=True)
         path = os.path.join(data_root, "cmu_us_{}_arctic/trimmed/source-{}.wav".format(title, target_sr))
-        librosa.output.write_wav(path, source[:T_min], target_sr)
+        sf.write(path, source[:T_min], target_sr)
 
     # Room impulse response
     reverb = args.reverb
@@ -63,11 +63,11 @@ def convolve_mird(data_root, title, reverb=0.160, degree=0, mic_intervals="3-3-3
         rir = rir[:samples]
 
     wav_path = os.path.join(data_root, "cmu_us_{}_arctic/trimmed/source-{}.wav".format(title, sr))
-    source, sr = librosa.load(wav_path, sr)
+    source, sr = sf.read(wav_path)
     convolved_signals = np.convolve(source, rir[:, mic_idx])
 
     wav_path = os.path.join(data_root, "cmu_us_{}_arctic/trimmed/convolved-{}_deg{}-mic{}.wav".format(title, sr, degree, mic_idx))
-    librosa.output.write_wav(wav_path, convolved_signals, sr)
+    sf.write(wav_path, convolved_signals, sr)
     
 if __name__ == '__main__':
     args = parser.parse_args()
