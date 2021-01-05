@@ -270,7 +270,7 @@ class GaussILRMA(ILRMAbase):
             # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
-            WU_inverse = np.linalg.solve(WU, E)
+            WU_inverse = np.linalg.solve(WU, E[:,source_idx,:])
             # WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
             w = WU_inverse[...,source_idx] # (n_bins, n_channels)
             wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
