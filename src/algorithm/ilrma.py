@@ -3,6 +3,7 @@ import numpy as np
 from algorithm.projection_back import projection_back
 
 EPS=1e-12
+THRESHOLD=1e+12
 
 class ILRMAbase:
     """
@@ -93,13 +94,15 @@ class GaussILRMA(ILRMAbase):
     Reference: "Determined Blind Source Separation Unifying Independent Vector Analysis and Nonnegative Matrix Factorization"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
         """
         Args:
+            threshold: thresholf for condition number when computing (WU)^{-1}.
         """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
         self.reference_id = reference_id
+        self.threshold = threshold
 
         # TODO: domain
     
@@ -239,9 +242,9 @@ class GaussILRMA(ILRMAbase):
             self.base, self.activation = T, V
 
     def update_space_model(self):
-        n_sources = self.n_sources
+        n_sources, n_channels = self.n_sources, self.n_channels
         n_bins = self.n_bins
-        eps = self.eps
+        eps, threshold = self.eps, self.threshold
 
         X, W = self.input, self.demix_filter
         
@@ -255,25 +258,30 @@ class GaussILRMA(ILRMAbase):
             TV = T @ V
             R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
         
-        R[R < eps] = eps
-
         X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
         X = X[...,np.newaxis]
         X_Hermite = X.transpose(0,1,3,2).conj()
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+        R[R < eps] = eps
         U = XX / R
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
+        E = np.eye(n_sources, n_channels)
+        E = np.tile(E, reps=(n_bins,1,1)) # (n_bins, n_sources, n_channels)
 
         for source_idx in range(n_sources):
             # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
+            w_n_Hermite = W[:,source_idx,:] # (n_bins, n_channels)
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
-            WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
-            w = WU_inverse[...,source_idx] # (n_bins, n_channels)
-            wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
+            condition = np.linalg.cond(WU) < threshold # (n_bins,)
+            condition = condition[:,np.newaxis] # (n_bins, 1)
+            e_n = E[:,source_idx,:]
+            w_n = np.linalg.solve(WU, e_n)
+            wUw = w_n[:,np.newaxis,:].conj() @ U_n @ w_n[:,:,np.newaxis]
             denominator = np.sqrt(wUw[...,0])
-            denominator[denominator < eps] = eps
-            W[:,source_idx,:] = w.conj() / denominator
+            w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
+            # if condition number is too big, `denominator[denominator < eps] = eps` may diverge of cost function.
+            W[:,source_idx,:] = w_n_Hermite
 
         self.demix_filter = W
 
