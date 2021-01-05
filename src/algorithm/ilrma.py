@@ -146,7 +146,7 @@ class GaussILRMA(ILRMAbase):
         if self.normalize:
             P = np.abs(Y)**2
             aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
-            # aux[aux < eps] = eps
+            aux[aux < eps] = eps
 
             # Normalize
             W = W / aux[np.newaxis,:,np.newaxis]
@@ -240,6 +240,7 @@ class GaussILRMA(ILRMAbase):
 
     def update_space_model(self):
         n_sources = self.n_sources
+        n_bins = self.n_bins
         eps = self.eps
 
         X, W = self.input, self.demix_filter
@@ -262,12 +263,15 @@ class GaussILRMA(ILRMAbase):
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
         U = XX / R
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
+        E = np.eye(n_sources)
+        E = np.tile(E, reps=(n_bins, 1, 1))
 
         for source_idx in range(n_sources):
             # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
-            WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
+            WU_inverse = np.linalg.solve(WU, E)
+            # WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
             w = WU_inverse[...,source_idx] # (n_bins, n_channels)
             wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
             denominator = np.sqrt(wUw[...,0])
