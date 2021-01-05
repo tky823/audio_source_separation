@@ -7,7 +7,7 @@ import numpy as np
 from scipy.io import loadmat
 import librosa
 
-parser = argparse.ArgumentParser(description="Example of frequency-domain ICA (FDICA)")
+parser = argparse.ArgumentParser(description="Example of independent low-rank matrix axalysis (ILRMA)")
 
 parser.add_argument('--data_root', type=str, default=None, help='Path for dataset ROOT directory.')
 parser.add_argument('--titles', type=str, default="aew axb bdl", help='Path for dataset ROOT directory.')
@@ -34,7 +34,7 @@ def main(args):
         path = os.path.join(data_root, "cmu_us_{}_arctic/wav/arctic_a{:04d}.wav".format(title, idx+1))
         source, sr = librosa.load(path, target_sr)
 
-        path = os.path.join(data_root, "cmu_us_{}_arctic/trimmed".format(title, idx+1))
+        path = os.path.join(data_root, "cmu_us_{}_arctic/trimmed".format(title))
         os.makedirs(path, exist_ok=True)
         path = os.path.join(data_root, "cmu_us_{}_arctic/trimmed/source-{}.wav".format(title, target_sr))
         librosa.output.write_wav(path, source[:T_min], target_sr)
@@ -45,7 +45,7 @@ def main(args):
     samples = int(duration * target_sr)
     mic_intervals = args.mic_intervals
     mic_indices = list(range(8))
-    degrees = [0, 15, 30, 45, 60, 75, 90, 270, 285, 300, 315, 330]
+    degrees = [0, 15, 30, 45, 60, 75, 90, 270, 285, 300, 315, 330, 345]
     
     for title in titles:
         for degree in degrees:
