@@ -2,21 +2,19 @@ import numpy as np
 
 EPS=1e-12
 
-def delay_sum_beamform(input, steering_vector, reference_id=0, eps=EPS):
+def delay_sum_beamform(input, steering_vector, reference_id=0):
     """
-        Args:
-            input (n_channels, n_bins, n_frames)
-            steering_vector (n_bins, n_channels, n_sources)
-        Returns:
-            output (n_sources, n_bins, n_frames)
+    Args:
+        input (n_channels, n_bins, n_frames)
+        steering_vector (n_bins, n_channels, n_sources)
+    Returns:
+        output (n_bins, n_frames)
     """
-    norm = np.sqrt(np.sum(steering_vector**2, axis=0)) # (n_sources,)
-    norm[norm < eps] = eps
-    steering_vector = steering_vector / norm # (n_bins, n_channels, n_sources)
-    steering_vector = steering_vector.transpose(2,1,0)[...,np.newaxis] # (n_sources, n_channels, n_bins, 1)
-    estimation = np.sum(steering_vector.conj() * input, axis=1, keepdims=True) # (n_sources, 1, n_bins, n_frames)
-    estimation = estimation * steering_vector # (n_sources, n_channels, n_bins, n_frames)
-    output = estimation[:,reference_id,:,:] # (n_sources, n_bins, n_frames)
+    X, A = input, steering_vector
+    a_Hermite = A.transpose(2,1,0)[...,np.newaxis].conj() # (n_sources, n_channels, n_bins, 1)
+    Y = np.sum(a_Hermite * X, axis=1) # (n_sources, n_bins, n_frames)
+    A = A.transpose(1,2,0)[...,np.newaxis] # (n_channels, n_sources, n_bins, 1)
+    output = A[reference_id,:,:] * Y
 
     return output
 
@@ -25,10 +23,9 @@ def mvdr_beamform(input, steering_vector, covariance=None, reference_id=0, eps=E
 
 
 class DelaySumBeamformer:
-    def __init__(self, steering_vector, reference_id=0, eps=EPS):
+    def __init__(self, steering_vector, reference_id=0):
         self.steering_vector = steering_vector
         self.reference_id = reference_id
-        self.eps = eps
     
     def __call__(self, input):
         """
@@ -37,8 +34,9 @@ class DelaySumBeamformer:
         Returns:
             output (n_sources, n_bins, n_frames)
         """
-        output = delay_sum_beamform(input, self.steering_vector, reference_id=self.reference_id, eps=self.eps)
         self.input = input
+
+        output = delay_sum_beamform(input, self.steering_vector, reference_id=self.reference_id)
         self.estimation = output
 
         return output
@@ -96,7 +94,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
         for title_idx in range(len(titles)):
             degree = degrees[title_idx]
             title = titles[title_idx]
-            rir_path = "data/MIRD/Reverb{:.3f}_{}/Impulse_response_Acoustic_Lab_Bar-Ilan_University_(Reverberation_{:.3f}s)_{}_1m_{:03d}.mat".format(reverb, intervals, reverb, intervals, degree)
+            rir_path = "data/MIRD/Reverb{:.3f}_{}/Impulse_response_Acoustic_Lab_Bar-Ilan_University_(Reverberation_{:.3f}s)_{}_2m_{:03d}.mat".format(reverb, intervals, reverb, intervals, degree)
             rir_mat = loadmat(rir_path)
 
             rir = rir_mat['impulse_response']
@@ -119,13 +117,11 @@ def _test(method='DSBF'):
     reverb = 0.16
     duration = 0.5
     samples = int(duration * sr)
-    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
-    mic_indices = [3, 4, 5]
+    mic_intervals = [3, 3, 3, 8, 3, 3, 3]
+    mic_indices = [0, 1, 2, 3, 4, 5, 6, 7]
+    mic_position = np.array([[0.13, 0], [0.10, 0], [0.07, 0], [0.04, 0], [-0.04, 0], [-0.07, 0], [-0.10, 0], [-0.13, 0]])
     degrees = [60, 300]
     titles = ['man-16000', 'woman-16000']
-    doa = (np.array(degrees) / 180) * np.pi
-    source_position = np.vstack([np.cos(doa), np.sin(doa)]).transpose(1,0) # (n_sources, 1, 2)
-    mic_position = np.array([[0.04, 0], [-0.04, 0], [-0.12, 0]])[:,np.newaxis,:] # (n_channels, 2)
 
     n_sources, n_channels = len(degrees), len(mic_indices)
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
@@ -134,16 +130,18 @@ def _test(method='DSBF'):
     # STFT
     fft_size, hop_size = 2048, 1024
     n_bins = fft_size//2 + 1
+    frequency = np.arange(0, n_bins) * sr / fft_size
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size) # (n_channels, n_bins, n_frames)
 
     # Steeing vectors
-    omega = np.arange(n_bins) * sr / fft_size # (n_bins,)
-    omega = omega[:,np.newaxis,np.newaxis] # (n_bins, 1, 1)
-    inner_product = np.sum(source_position * mic_position, axis=2) # (n_channels, n_sources)
-    steering_vector = np.exp(2j * np.pi * omega * inner_product / sound_speed) / np.sqrt(n_channels) # (n_channels, n_sources)
+    degrees = np.array(degrees) / 180 * np.pi
+    x_source, y_source = np.sin(degrees), np.cos(degrees) # (n_sources,)
+    source_position = np.vstack([x_source, y_source]).transpose(1,0) # (n_sources, 2)
+    steering_vector = np.exp(2j * np.pi * frequency[:,np.newaxis,np.newaxis] * np.sum(source_position * mic_position[:,np.newaxis,:], axis=2) / sound_speed) # (n_bins, n_channels, n_sources)
+    steering_vector = steering_vector / np.sqrt(len(mic_indices))
 
-    beamformer = DelaySumBeamFormer()
-    estimation = beamformer(mixture, steering_vector=steering_vector)
+    beamformer = DelaySumBeamformer(steering_vector=steering_vector)
+    estimation = beamformer(mixture)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
 
