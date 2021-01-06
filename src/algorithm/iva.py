@@ -39,6 +39,9 @@ class IVAbase:
 
         self._reset()
 
+        loss = self.compute_negative_loglikelihood()
+        self.loss.append(loss)
+
         for idx in range(iteration):
             self.update_once()
 
@@ -54,7 +57,7 @@ class IVAbase:
         return output
 
     def update_once(self):
-        raise NotImplementedError("Implement 'update' function")
+        raise NotImplementedError("Implement 'update_once' function")
     
     def separate(self, input, demix_filter):
         """
@@ -71,19 +74,12 @@ class IVAbase:
         return output
     
     def compute_negative_loglikelihood(self):
-        Y = self.estimation
-        W = self.demix_filter
+        raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
-        P = np.sum(np.abs(Y)**2, axis=1)
-        loss = 2 * np.sum(np.sqrt(P), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
-
-        return loss
-
-class GradIVA(IVAbase):
-    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, callback=None, eps=EPS):
+class GradIVAbase(IVAbase):
+    def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
         super().__init__(callback=callback, eps=eps)
 
-        self.distr = distr
         self.lr = lr
         self.reference_id = reference_id
     
@@ -120,21 +116,19 @@ class GradIVA(IVAbase):
         return output
     
     def update_once(self):
-        reference_id = self.reference_id
+        raise NotImplementedError("Implement 'update_once' function")
 
-        if self.distr == 'laplace':
-            self.update_laplace()
-        else:
-            raise NotImplementedError("Cannot support {} distribution.".format(self.distr))
+    def compute_negative_loglikelihood(self):
+        raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
-        X = self.input
-        W = self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+class GradLaplaceIVA(GradIVAbase):
+    def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
+        super().__init__(callback=callback, eps=eps)
 
-        self.estimation = Y
+        self.lr = lr
+        self.reference_id = reference_id
     
-    def update_laplace(self):
-        n_sources, n_channels = self.n_sources, self.n_channels
+    def update_once(self):
         n_frames = self.n_frames
         lr = self.lr
         eps = self.eps
@@ -155,18 +149,30 @@ class GradIVA(IVAbase):
 
         delta = (Phi @ X_Hermite) / n_frames - W_inverseHermite
         W = W - lr * delta # (n_bins, n_sources, n_channels)
+        
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
 
         self.demix_filter = W
+        self.estimation = Y
+    
+    def compute_negative_loglikelihood(self):
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+        P = np.sum(np.abs(Y)**2, axis=1)
+        loss = 2 * np.sum(np.sqrt(P), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
 
-class NaturalGradIVA(GradIVA):
-    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, callback=None, eps=EPS):
-        super().__init__(distr=distr, lr=lr, reference_id=reference_id, callback=callback, eps=eps)
+        return loss
 
-        self.distr = distr
+
+class NaturalGradLaplaceIVA(GradIVAbase):
+    def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
+        super().__init__(lr=lr, reference_id=reference_id, callback=callback, eps=eps)
+
         self.lr = lr
         self.reference_id = reference_id
 
-    def update_laplace(self):
+    def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
         n_frames = self.n_frames
         lr = self.lr
@@ -186,11 +192,23 @@ class NaturalGradIVA(GradIVA):
 
         delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
         W = W - lr * delta # (n_bins, n_sources, n_channels)
+        
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
 
         self.demix_filter = W
+        self.estimation = Y
+    
+    def compute_negative_loglikelihood(self):
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+        P = np.sum(np.abs(Y)**2, axis=1)
+        loss = 2 * np.sum(np.sqrt(P), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+
+        return loss
 
 
-class AuxIVA(IVAbase):
+class AuxIVAbase(IVAbase):
     def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
         super().__init__(callback=callback, eps=eps)
 
@@ -228,6 +246,17 @@ class AuxIVA(IVAbase):
         self.estimation = output
 
         return output
+    
+    def update_once(self):
+        raise NotImplementedError("Implement 'update_once' function.")
+
+    def compute_negative_loglikelihood(self):
+        raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
+
+
+class AuxLaplaceIVA(AuxIVAbase):
+    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+        super().__init__(reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
     
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -269,6 +298,14 @@ class AuxIVA(IVAbase):
         Y = self.separate(X, demix_filter=W)
         
         self.estimation = Y
+    
+    def compute_negative_loglikelihood(self):
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+        P = np.sum(np.abs(Y)**2, axis=1)
+        loss = 2 * np.sum(np.sqrt(P), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+
+        return loss
 
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
@@ -306,7 +343,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
     return mixed_signals
 
-def _test(method='AuxIVA'):
+def _test(method='AuxLaplaceIVA'):
     np.random.seed(111)
     
     # Room impulse response
@@ -332,14 +369,14 @@ def _test(method='AuxIVA'):
     n_sources = len(titles)
     iteration = 200
 
-    if method == 'GradIVA':
-        iva = GradIVA(lr=lr)
+    if method == 'GradLaplaceIVA':
+        iva = GradLaplaceIVA(lr=lr)
         iteration = 5000
-    elif method == 'NaturalGradIVA':
-        iva = NaturalGradIVA(lr=lr)
+    elif method == 'NaturalGradLaplaceIVA':
+        iva = NaturalGradLaplaceIVA(lr=lr)
         iteration = 200
-    elif method == 'AuxIVA':
-        iva = AuxIVA()
+    elif method == 'AuxLaplaceIVA':
+        iva = AuxLaplaceIVA()
         iteration = 50
     else:
         raise ValueError("Not support method {}".format(method))
@@ -373,9 +410,9 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/IVA/GradIVA", exist_ok=True)
-    os.makedirs("data/iVA/NaturalGradIVA", exist_ok=True)
-    os.makedirs("data/iVA/AuxIVA", exist_ok=True)
+    os.makedirs("data/IVA/GradLaplaceIVA", exist_ok=True)
+    os.makedirs("data/iVA/NaturalGradLaplaceIVA", exist_ok=True)
+    os.makedirs("data/iVA/AuxLaplaceIVA", exist_ok=True)
 
 
     """
@@ -384,6 +421,6 @@ if __name__ == '__main__':
     """
 
     # _test_conv()
-    _test(method='GradIVA')
-    _test(method='NaturalGradIVA')
-    _test(method='AuxIVA')
+    _test(method='GradLaplaceIVA')
+    _test(method='NaturalGradLaplaceIVA')
+    _test(method='AuxLaplaceIVA')
