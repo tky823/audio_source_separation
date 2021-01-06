@@ -307,6 +307,13 @@ class AuxLaplaceIVA(AuxIVAbase):
 
         return loss
 
+class AuxGaussIVA(AuxIVAbase):
+    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+        super().__init__(reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
+    
+    def update_once(self):
+        raise NotImplementedError("in progress...")
+
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
