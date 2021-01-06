@@ -97,7 +97,8 @@ class GaussILRMA(ILRMAbase):
     def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
         """
         Args:
-            threshold: thresholf for condition number when computing (WU)^{-1}.
+            normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
+            threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
@@ -323,10 +324,12 @@ class tILRMA(ILRMAbase):
     Reference: "Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation"
     See: https://ieeexplore.ieee.org/document/8168129
     """
-    def __init__(self, n_bases=10, nu=1.0, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, nu=1.0, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
         """
         Args:
             nu: degree of freedom. nu = 1: Cauchy distribution, nu -> infty: Gaussian distribution.
+            normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
+            threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
@@ -544,7 +547,7 @@ class KLILRMA(ILRMAbase):
     """
     Reference: "Independent Low-Rank Matrix Analysis Based on Generalized Kullback-Leibler Divergence"
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
         self.reference_id = reference_id
@@ -586,11 +589,11 @@ class RegularizedILRMA(ILRMAbase):
     Reference: "Blind source separation based on independent low-rank matrix analysis with sparse regularization for time-series activity"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
         """
         Args:
-
+            normalize <str>
         """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
