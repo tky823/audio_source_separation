@@ -94,7 +94,7 @@ class GaussILRMA(ILRMAbase):
     Reference: "Determined Blind Source Separation Unifying Independent Vector Analysis and Nonnegative Matrix Factorization"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             threshold: thresholf for condition number when computing (WU)^{-1}.
@@ -147,27 +147,38 @@ class GaussILRMA(ILRMAbase):
         self.estimation = Y
         
         if self.normalize:
-            P = np.abs(Y)**2
-            aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
-            aux[aux < eps] = eps
+            if self.normalize == 'power':
+                P = np.abs(Y)**2
+                aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
+                aux[aux < eps] = eps
 
-            # Normalize
-            W = W / aux[np.newaxis,:,np.newaxis]
-            Y = Y / aux[:,np.newaxis,np.newaxis]
+                # Normalize
+                W = W / aux[np.newaxis,:,np.newaxis]
+                Y = Y / aux[:,np.newaxis,np.newaxis]
 
-            if self.partitioning:
-                Z = self.latent
-                T = self.base
-                Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
-                Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
-                T = T * Zauxsum # (n_bins, n_bases)
-                Z = Zaux / Zauxsum # (n_sources, n_bases)
-                self.latent = Z
-                self.base = T
+                if self.partitioning:
+                    Z = self.latent
+                    T = self.base
+                    Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
+                    Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
+                    T = T * Zauxsum # (n_bins, n_bases)
+                    Z = Zaux / Zauxsum # (n_sources, n_bases)
+                    self.latent = Z
+                    self.base = T
+                else:
+                    T = self.base
+                    T = T / (aux[:,np.newaxis,np.newaxis]**2)
+                    self.base = T
+            elif self.normalize == 'projection-back':
+                if self.partitioning:
+                    raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
+                scale = projection_back(Y, reference=X[self.reference_id])
+                Y = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+                X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
+                X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
+                W = Y.transpose(1,0,2) @ X_Hermite @ np.linalg.inv(X @ X_Hermite) # (n_bins, n_sources, n_channels)
             else:
-                T = self.base
-                T = T / (aux[:,np.newaxis,np.newaxis]**2)
-                self.base = T
+                raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
             
             self.demix_filter = W
             self.estimation = Y
