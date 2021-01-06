@@ -55,6 +55,9 @@ class ILRMAbase:
 
         self._reset()
 
+        loss = self.compute_negative_loglikelihood()    
+        self.loss.append(loss)
+
         for idx in range(iteration):
             self.update_once()
 
@@ -117,6 +120,9 @@ class GaussILRMA(ILRMAbase):
         self.input = input
 
         self._reset()
+
+        loss = self.compute_negative_loglikelihood()    
+        self.loss.append(loss)
 
         for idx in range(iteration):
             self.update_once()
@@ -349,6 +355,9 @@ class tILRMA(ILRMAbase):
 
         self._reset()
 
+        loss = self.compute_negative_loglikelihood()    
+        self.loss.append(loss)
+
         for idx in range(iteration):
             self.update_once()
 
@@ -565,6 +574,9 @@ class KLILRMA(ILRMAbase):
 
         self._reset()
 
+        loss = self.compute_negative_loglikelihood()    
+        self.loss.append(loss)
+
         for idx in range(iteration):
             self.update_once()
 
@@ -673,13 +685,13 @@ def _test(method, n_bases=10, partitioning=False):
 
     for idx in range(n_channels):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/ILRMA/{}/partitioning{}/mixture-{}_estimated-iter{}-{}.wav".format(method, int(partitioning), sr, iteration, idx), signal=_estimated_signal, sr=sr)
+        write_wav("data/ILRMA/{}ILMRA/partitioning{}/mixture-{}_estimated-iter{}-{}.wav".format(method, int(partitioning), sr, iteration, idx), signal=_estimated_signal, sr=sr)
     
     plt.figure()
     plt.plot(ilrma.loss, color='black')
     plt.xlabel('Iteration')
     plt.ylabel('Loss')
-    plt.savefig('data/ILRMA/{}/partitioning{}/loss.png'.format(method, int(partitioning)), bbox_inches='tight')
+    plt.savefig('data/ILRMA/{}ILMRA/partitioning{}/loss.png'.format(method, int(partitioning)), bbox_inches='tight')
     plt.close()
 
 def _test_conv():
@@ -707,10 +719,10 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/ILRMA/Gauss/partitioning0", exist_ok=True)
-    os.makedirs("data/ILRMA/Gauss/partitioning1", exist_ok=True)
-    os.makedirs("data/ILRMA/t/partitioning0", exist_ok=True)
-    os.makedirs("data/ILRMA/t/partitioning1", exist_ok=True)
+    os.makedirs("data/ILRMA/GaussILMRA/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/GaussILMRA/partitioning1", exist_ok=True)
+    os.makedirs("data/ILRMA/tILMRA/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/tILMRA/partitioning1", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
