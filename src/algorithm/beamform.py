@@ -30,7 +30,7 @@ def mvdr_beamform(input, steering_vector, covariance=None, reference_id=0, eps=E
     X, A = input.transpose(1,0,2), steering_vector
     if covariance is None:
         _, _, n_frames = X.shape # (n_bins, n_channels, n_frames)
-        covariance = (X @ X.transpose(0,2,1)) / n_frames # (n_bins, n_channels, n_channels)
+        covariance = np.mean(X[:,:,np.newaxis,:] * X[:,np.newaxis,:,:].conj(), axis=3) # (n_bins, n_channels, n_channels)
     R = covariance
     R_inverse = np.linalg.inv(R) # (n_bins, n_channels, n_channels)
     A_Hermite = A.conj() # (n_bins, n_channels, n_sources)
@@ -114,14 +114,17 @@ class MaxSNRBeamformer:
         self.reference_id = reference_id
         self.eps = eps
     
-    def __call__(self, input):
+    def __call__(self, input, steering_vector=None):
         """
         Args:
             input (n_channels, n_bins, n_frames)
         Returns:
             output (n_sources, n_bins, n_frames)
         """
-        pass
+        if steering_vector is not None:
+            self.steering_vector = steering_vector
+        elif self.steering_vector is None:
+            raise ValueError("Specify steering vector.")
 
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
@@ -168,7 +171,7 @@ def _test(method='DSBF'):
     mic_intervals = [3, 3, 3, 8, 3, 3, 3]
     mic_indices = [0, 1, 2, 3, 4, 5, 6, 7]
     mic_position = np.array([[0.13, 0], [0.10, 0], [0.07, 0], [0.04, 0], [-0.04, 0], [-0.07, 0], [-0.10, 0], [-0.13, 0]])
-    degrees = [60, 300]
+    degrees = [0, 90]
     titles = ['man-16000', 'woman-16000']
 
     n_sources, n_channels = len(degrees), len(mic_indices)
@@ -197,6 +200,18 @@ def _test(method='DSBF'):
 
     estimation = beamformer(mixture)
 
+    spectrogram = np.abs(estimation)
+    log_spectrogram = 10 * np.log10(spectrogram**2)
+    N, F_bin, T_bin = log_spectrogram.shape
+    t = np.arange(T_bin + 1)
+    f = np.arange(F_bin + 1)
+
+    for n in range(N):
+        plt.figure()
+        plt.pcolormesh(t, f, log_spectrogram[n], cmap='jet')
+        plt.savefig("data/Beamform/{}/specrtogram-{}.png".format(method, n), bbox_inches='tight')
+        plt.close()
+
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
 
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
@@ -213,10 +228,12 @@ if __name__ == '__main__':
     from utils.utils_audio import read_wav, write_wav
     from algorithm.stft import stft, istft
 
+    plt.rcParams['figure.dpi'] = 200
+
     sound_speed=340
 
     os.makedirs('data/Beamform/DSBF', exist_ok=True)
     os.makedirs('data/Beamform/MVDR', exist_ok=True)
 
-    # _test('DSBF')
+    _test('DSBF')
     _test('MVDR')
