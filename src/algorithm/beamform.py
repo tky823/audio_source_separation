@@ -29,7 +29,6 @@ def mvdr_beamform(input, steering_vector, covariance=None, reference_id=0, eps=E
     """
     X, A = input.transpose(1,0,2), steering_vector
     if covariance is None:
-        _, _, n_frames = X.shape # (n_bins, n_channels, n_frames)
         covariance = np.mean(X[:,:,np.newaxis,:] * X[:,np.newaxis,:,:].conj(), axis=3) # (n_bins, n_channels, n_channels)
     R = covariance
     R_inverse = np.linalg.inv(R) # (n_bins, n_channels, n_channels)
