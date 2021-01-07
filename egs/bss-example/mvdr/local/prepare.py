@@ -56,7 +56,7 @@ def main(args):
 
 
 def convolve_mird(data_root, title, reverb=0.160, degree=0, mic_intervals="3-3-3-8-3-3-3", mic_idx=0, distance=1, sr=16000, samples=None):
-    rir_path = os.path.join(data_root, "MIRD/Reverb{:.3f}_{}/Impulse_response_Acoustic_Lab_Bar-Ilan_University_(Reverberation_{:.3f}s)_{}_{:1d}m_{:03d}.mat".format(reverb, mic_intervals, reverb, mic_intervals, distance, degree))
+    rir_path = os.path.join(data_root, "MIRD/Reverb{:.3f}_{}/Impulse_response_Acoustic_Lab_Bar-Ilan_University_(Reverberation_{:.3f}s)_{}_{:.0f}m_{:03d}.mat".format(reverb, mic_intervals, reverb, mic_intervals, distance, degree))
     rir_mat = loadmat(rir_path)
 
     rir = rir_mat['impulse_response']
