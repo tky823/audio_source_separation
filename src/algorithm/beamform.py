@@ -88,7 +88,7 @@ class MVDRBeamformer:
         self.reference_id = reference_id
         self.eps = eps
     
-    def __call__(self, input, steering_vector=None):
+    def __call__(self, input, steering_vector=None, covariance=None):
         """
         Args:
             input (n_channels, n_bins, n_frames)
@@ -103,7 +103,7 @@ class MVDRBeamformer:
         elif self.steering_vector is None:
             raise ValueError("Specify steering vector.")
 
-        output = mvdr_beamform(input, self.steering_vector, reference_id=self.reference_id, eps=self.eps)
+        output = mvdr_beamform(input, self.steering_vector, covariance=covariance, reference_id=self.reference_id, eps=self.eps)
         self.estimation = output
 
         return output
