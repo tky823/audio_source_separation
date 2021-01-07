@@ -8,33 +8,69 @@ def delay_sum_beamform(input, steering_vector, reference_id=0):
         input (n_channels, n_bins, n_frames)
         steering_vector (n_bins, n_channels, n_sources)
     Returns:
-        output (n_bins, n_frames)
+        output (n_sources, n_bins, n_frames)
     """
     X, A = input, steering_vector
     a_Hermite = A.transpose(2,1,0)[...,np.newaxis].conj() # (n_sources, n_channels, n_bins, 1)
     Y = np.sum(a_Hermite * X, axis=1) # (n_sources, n_bins, n_frames)
     A = A.transpose(1,2,0)[...,np.newaxis] # (n_channels, n_sources, n_bins, 1)
-    output = A[reference_id,:,:] * Y
+    output = A[reference_id,:,:,:] * Y
 
     return output
 
 def mvdr_beamform(input, steering_vector, covariance=None, reference_id=0, eps=EPS):
-    raise NotImplementedError("Implement MVDR")
+    """
+    Args:
+        input (n_channels, n_bins, n_frames)
+        steering_vector (n_bins, n_channels, n_sources)
+        covariance (n_bins, n_channels, n_channels) <optional>
+    Returns:
+        output (n_sources, n_bins, n_frames)
+    """
+    X, A = input.transpose(1,0,2), steering_vector
+    if covariance is None:
+        _, _, n_frames = X.shape # (n_bins, n_channels, n_frames)
+        covariance = (X @ X.transpose(0,2,1)) / n_frames # (n_bins, n_channels, n_channels)
+    R = covariance
+    R_inverse = np.linalg.inv(R) # (n_bins, n_channels, n_channels)
+    A_Hermite = A.conj() # (n_bins, n_channels, n_sources)
+    numerator = R_inverse @ A # (n_bins, n_channels, n_sources)
+    denominator = np.sum(A_Hermite * numerator, axis=1, keepdims=True) # (n_bins, 1, n_sources)
+    denominator[denominator < eps] = eps
+    W = numerator / denominator # (n_bins, n_channels, n_sources)
+    W = W.transpose(0,2,1) # (n_bins, n_sources, n_channels)
+    Y = W @ X # (n_bins, n_sources, n_frames)
+    Y = Y.transpose(1,0,2) # (n_sources, n_bins, n_frames)
+    A = A.transpose(1,2,0)[...,np.newaxis] # (n_channels, n_sources, n_bins, 1)
+    output = A[reference_id,:,:,:] * Y
+
+    return output
 
 
 class DelaySumBeamformer:
-    def __init__(self, steering_vector, reference_id=0):
+    def __init__(self, steering_vector=None, reference_id=0):
+        """
+        Args:
+            steering_vector (n_bins, n_channels, n_sources)
+            reference_id <int>
+        """
         self.steering_vector = steering_vector
         self.reference_id = reference_id
     
-    def __call__(self, input):
+    def __call__(self, input, steering_vector=None):
         """
         Args:
             input (n_channels, n_bins, n_frames)
+            steering_vector (n_bins, n_channels, n_sources)
         Returns:
             output (n_sources, n_bins, n_frames)
         """
         self.input = input
+
+        if steering_vector is not None:
+            self.steering_vector = steering_vector
+        elif self.steering_vector is None:
+            raise ValueError("Specify steering vector.")
 
         output = delay_sum_beamform(input, self.steering_vector, reference_id=self.reference_id)
         self.estimation = output
@@ -43,19 +79,31 @@ class DelaySumBeamformer:
 
 class MVDRBeamformer:
     def __init__(self, steering_vector, reference_id=0, eps=EPS):
+        """
+        Args:
+            steering_vector (n_bins, n_channels, n_sources)
+            reference_id <int>
+        """
         self.steering_vector = steering_vector
         self.reference_id = reference_id
         self.eps = eps
     
-    def __call__(self, input):
+    def __call__(self, input, steering_vector=None):
         """
         Args:
             input (n_channels, n_bins, n_frames)
+            steering_vector (n_bins, n_channels, n_sources)
         Returns:
             output (n_sources, n_bins, n_frames)
         """
-        output = mvdr_beamform(input, self.steering_vector, reference_id=self.reference_id, eps=self.eps)
         self.input = input
+
+        if steering_vector is not None:
+            self.steering_vector = steering_vector
+        elif self.steering_vector is None:
+            raise ValueError("Specify steering vector.")
+
+        output = mvdr_beamform(input, self.steering_vector, reference_id=self.reference_id, eps=self.eps)
         self.estimation = output
 
         return output
@@ -140,7 +188,13 @@ def _test(method='DSBF'):
     steering_vector = np.exp(2j * np.pi * frequency[:,np.newaxis,np.newaxis] * np.sum(source_position * mic_position[:,np.newaxis,:], axis=2) / sound_speed) # (n_bins, n_channels, n_sources)
     steering_vector = steering_vector / np.sqrt(len(mic_indices))
 
-    beamformer = DelaySumBeamformer(steering_vector=steering_vector)
+    if method == 'DSBF':
+        beamformer = DelaySumBeamformer(steering_vector=steering_vector)
+    elif method == 'MVDR':
+        beamformer = MVDRBeamformer(steering_vector=steering_vector)
+    else:
+        raise NotImplementedError("Not support {} beamformer".format(method))
+
     estimation = beamformer(mixture)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
@@ -162,5 +216,7 @@ if __name__ == '__main__':
     sound_speed=340
 
     os.makedirs('data/Beamform/DSBF', exist_ok=True)
+    os.makedirs('data/Beamform/MVDR', exist_ok=True)
 
-    _test('DSBF')
+    # _test('DSBF')
+    _test('MVDR')
