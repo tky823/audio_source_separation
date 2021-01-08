@@ -156,42 +156,7 @@ class GradLaplaceFDICA(GradFDICAbase):
     def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
         super().__init__(lr=lr, reference_id=reference_id, callback=callback, eps=eps)
     
-    def __call__(self, input, iteration=100):
-        """
-        Args:
-            input (n_channels, n_bins, n_frames)
-        Returns:
-            output (n_channels, n_bins, n_frames)
-        """
-        self.input = input
-
-        self._reset()
-
-        loss = self.compute_negative_loglikelihood()
-        self.loss.append(loss)
-
-        for idx in range(iteration):
-            self.update_once()
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
-
-            if self.callback is not None:
-                self.callback(self)
-        
-        self.solve_permutation()
-
-        reference_id = self.reference_id
-        X, W = input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
-
-        scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
-        self.estimation = output
-
-        return output
-    
     def update_once(self):
-        n_sources, n_channels = self.n_sources, self.n_channels
         n_frames = self.n_frames
         lr = self.lr
         eps = self.eps
@@ -229,9 +194,6 @@ class GradLaplaceFDICA(GradFDICAbase):
 class NaturalGradLaplaceFDICA(GradFDICAbase):
     def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
         super().__init__(lr=lr, reference_id=reference_id, callback=callback, eps=eps)
-
-        self.lr = lr
-        self.reference_id = reference_id
 
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
