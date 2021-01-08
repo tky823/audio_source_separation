@@ -69,21 +69,49 @@ class FDICAbase:
         output = estimation.transpose(1,0,2)
 
         return output
+
+    def solve_permutation(self):
+        n_sources, n_bins, n_frames = self.n_sources, self.n_bins, self.n_frames
+        eps = self.eps
+
+        permutations = list(itertools.permutations(range(n_sources)))
+
+        W = self.demix_filter # (n_bins, n_sources, n_chennels)
+        Y = self.estimation # (n_sources, n_bins, n_frames)
+
+        P = np.abs(Y).transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        norm = np.sqrt(np.sum(P**2, axis=1, keepdims=True))
+        norm[norm < eps] = eps
+        P = P / norm # (n_bins, n_sources, n_frames)
+        correlation = np.sum(P @ P.transpose(0,2,1), axis=(1,2)) # (n_sources,)
+        indices = np.argsort(correlation)
+
+        min_idx = indices[0]
+        P_criteria = P[min_idx] # (n_sources, n_frames)
+
+        for idx in range(1, n_bins):
+            min_idx = indices[idx]
+            P_max = None
+            perm_max = None
+            for perm in permutations:
+                P_perm = np.sum(P_criteria * P[min_idx, perm,:])
+                if P_max is None or P_perm > P_max:
+                    P_max = P_perm
+                    perm_max = perm
+            
+            P_criteria = P_criteria + P[min_idx,perm_max,:]
+            W[min_idx,:,:] = W[min_idx,perm_max,:]
+        
+        self.demix_filter = W
     
     def compute_negative_loglikelihood(self):
-        Y = self.estimation
-        W = self.demix_filter
+        raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
-        loss = 2 * np.abs(Y).sum(axis=0).mean(axis=1) - 2 * np.log(np.abs(np.linalg.det(W)))
-        loss = loss.sum()
 
-        return loss
-
-class GradFDICA(FDICAbase):
-    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, callback=None, eps=EPS):
+class GradFDICAbase(FDICAbase):
+    def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
         super().__init__(callback=callback, eps=eps)
 
-        self.distr = distr
         self.lr = lr
         self.reference_id = reference_id
     
@@ -121,21 +149,48 @@ class GradFDICA(FDICAbase):
 
         return output
     
-    def update_once(self):
+    def compute_negative_loglikelihood(self):
+        raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
+
+class GradLaplaceFDICA(GradFDICAbase):
+    def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
+        super().__init__(lr=lr, reference_id=reference_id, callback=callback, eps=eps)
+    
+    def __call__(self, input, iteration=100):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset()
+
+        loss = self.compute_negative_loglikelihood()
+        self.loss.append(loss)
+
+        for idx in range(iteration):
+            self.update_once()
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
+            if self.callback is not None:
+                self.callback(self)
+        
+        self.solve_permutation()
+
         reference_id = self.reference_id
-
-        if self.distr == 'laplace':
-            self.update_laplace()
-        else:
-            raise NotImplementedError("Cannot support {} distribution.".format(self.distr))
-
-        X = self.input
-        W = self.demix_filter
+        X, W = input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
 
-        self.estimation = Y
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        self.estimation = output
+
+        return output
     
-    def update_laplace(self):
+    def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
         n_frames = self.n_frames
         lr = self.lr
@@ -157,51 +212,28 @@ class GradFDICA(FDICAbase):
         delta = (Phi @ X_Hermite) / n_frames - W_inverseHermite
         W = W - lr * delta # (n_bins, n_sources, n_channels)
 
+        Y = self.separate(X, demix_filter=W)
+
         self.demix_filter = W
+        self.estimation = Y
     
-    def solve_permutation(self):
-        n_sources, n_bins, n_frames = self.n_sources, self.n_bins, self.n_frames
-        eps = self.eps
+    def compute_negative_loglikelihood(self):
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
 
-        permutations = list(itertools.permutations(range(n_sources)))
+        loss = 2 * np.abs(Y).sum(axis=0).mean(axis=1) - 2 * np.log(np.abs(np.linalg.det(W)))
+        loss = loss.sum()
 
-        W = self.demix_filter # (n_bins, n_sources, n_chennels)
-        Y = self.estimation # (n_sources, n_bins, n_frames)
+        return loss
 
-        P = np.abs(Y).transpose(1,0,2) # (n_bins, n_sources, n_frames)
-        norm = np.sqrt(np.sum(P**2, axis=1, keepdims=True))
-        norm[norm < eps] = eps
-        P = P / norm # (n_bins, n_sources, n_frames)
-        correlation = np.sum(P @ P.transpose(0,2,1), axis=(1,2)) # (n_sources,)
-        indices = np.argsort(correlation)
+class NaturalGradLaplaceFDICA(GradFDICAbase):
+    def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
+        super().__init__(lr=lr, reference_id=reference_id, callback=callback, eps=eps)
 
-        min_idx = indices[0]
-        P_criteria = P[min_idx] # (n_sources, n_frames)
-
-        for idx in range(1, n_bins):
-            min_idx = indices[idx]
-            P_max = None
-            perm_max = None
-            for perm in permutations:
-                P_perm = np.sum(P_criteria * P[min_idx, perm,:])
-                if P_max is None or P_perm > P_max:
-                    P_max = P_perm
-                    perm_max = perm
-            
-            P_criteria = P_criteria + P[min_idx,perm_max,:]
-            W[min_idx,:,:] = W[min_idx,perm_max,:]
-        
-        self.demix_filter = W
-
-class NaturalGradFDICA(GradFDICA):
-    def __init__(self, distr='laplace', lr=1e-1, reference_id=0, callback=None, eps=EPS):
-        super().__init__(distr=distr, lr=lr, reference_id=reference_id, callback=callback, eps=eps)
-
-        self.distr = distr
         self.lr = lr
         self.reference_id = reference_id
 
-    def update_laplace(self):
+    def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
         n_frames = self.n_frames
         lr = self.lr
@@ -221,7 +253,19 @@ class NaturalGradFDICA(GradFDICA):
         delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
         W = W - lr * delta # (n_bins, n_sources, n_channels)
 
+        Y = self.separate(X, demix_filter=W)
+
         self.demix_filter = W
+        self.estimation = Y
+    
+    def compute_negative_loglikelihood(self):
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        loss = 2 * np.abs(Y).sum(axis=0).mean(axis=1) - 2 * np.log(np.abs(np.linalg.det(W)))
+        loss = loss.sum()
+
+        return loss
 
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
@@ -286,11 +330,11 @@ def _test(method='NaturalGradFDICA'):
     n_sources = len(titles)
     iteration = 200
 
-    if method == 'GradFDICA':
-        fdica = GradFDICA(lr=lr)
+    if method == 'GradLaplaceFDICA':
+        fdica = GradLaplaceFDICA(lr=lr)
         iteration = 5000
-    elif method == 'NaturalGradFDICA':
-        fdica = NaturalGradFDICA(lr=lr)
+    elif method == 'NaturalGradLaplaceFDICA':
+        fdica = NaturalGradLaplaceFDICA(lr=lr)
         iteration = 200
     else:
         raise ValueError("Not support method {}".format(method))
@@ -337,8 +381,8 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/FDICA/GradFDICA", exist_ok=True)
-    os.makedirs("data/FDICA/NaturalGradFDICA", exist_ok=True)
+    os.makedirs("data/FDICA/GradLaplaceFDICA", exist_ok=True)
+    os.makedirs("data/FDICA/NaturalGradLaplaceFDICA", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
@@ -346,5 +390,5 @@ if __name__ == '__main__':
     """
 
     # _test_conv()
-    _test(method='GradFDICA')
-    _test(method='NaturalGradFDICA')
+    _test(method='GradLaplaceFDICA')
+    _test(method='NaturalGradLaplaceFDICA')
