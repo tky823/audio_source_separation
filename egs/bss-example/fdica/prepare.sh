@@ -7,6 +7,7 @@ titles="aew axb bdl"
 reverb=0.160
 duration=0.5
 mic_intervals='3-3-3-8-3-3-3'
+distance=1
 
 mkdir -p ${data_root}
 
@@ -34,4 +35,5 @@ prepare.py \
 --titles "${titles}" \
 --reverb ${reverb} \
 --duration ${duration} \
---mic_intervals ${mic_intervals}
+--mic_intervals ${mic_intervals} \
+--distance ${distance}
