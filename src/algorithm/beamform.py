@@ -18,18 +18,16 @@ def delay_sum_beamform(input, steering_vector, reference_id=0):
 
     return output
 
-def mvdr_beamform(input, steering_vector, covariance=None, reference_id=0, eps=EPS):
+def ml_beamform(input, steering_vector, covariance, reference_id=0, eps=EPS):
     """
     Args:
         input (n_channels, n_bins, n_frames)
         steering_vector (n_bins, n_channels, n_sources)
-        covariance (n_bins, n_channels, n_channels) <optional>
+        covariance (n_bins, n_channels, n_channels)
     Returns:
         output (n_sources, n_bins, n_frames)
     """
     X, A = input.transpose(1,0,2), steering_vector
-    if covariance is None:
-        covariance = np.mean(X[:,:,np.newaxis,:] * X[:,np.newaxis,:,:].conj(), axis=3) # (n_bins, n_channels, n_channels)
     R = covariance
     R_inverse = np.linalg.inv(R) # (n_bins, n_channels, n_channels)
     A_Hermite = A.conj() # (n_bins, n_channels, n_sources)
@@ -42,6 +40,20 @@ def mvdr_beamform(input, steering_vector, covariance=None, reference_id=0, eps=E
     Y = Y.transpose(1,0,2) # (n_sources, n_bins, n_frames)
     A = A.transpose(1,2,0)[...,np.newaxis] # (n_channels, n_sources, n_bins, 1)
     output = A[reference_id,:,:,:] * Y
+
+    return output
+
+def mvdr_beamform(input, steering_vector, reference_id=0, eps=EPS):
+    """
+    Args:
+        input (n_channels, n_bins, n_frames)
+        steering_vector (n_bins, n_channels, n_sources)
+    Returns:
+        output (n_sources, n_bins, n_frames)
+    """
+    X = input.transpose(1,0,2)
+    R = np.mean(X[:,:,np.newaxis,:] * X[:,np.newaxis,:,:].conj(), axis=3) # (n_bins, n_channels, n_channels)
+    output = ml_beamform(input, steering_vector, covariance=R, reference_id=reference_id, eps=eps)
 
     return output
 

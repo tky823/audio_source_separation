@@ -1,4 +1,3 @@
-from types import new_class
 import numpy as np
 
 def projection_back(Y, reference):
