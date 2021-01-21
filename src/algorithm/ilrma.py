@@ -19,8 +19,11 @@ class ILRMAbase:
         self.partitioning = partitioning
         self.normalize = normalize
     
-    def _reset(self):
+    def _reset(self, **kwargs):
         assert self.input is not None, "Specify data!"
+
+        for key in kwargs.keys():
+            setattr(self, key, kwargs[key])
 
         n_bases = self.n_bases
 
@@ -44,7 +47,7 @@ class ILRMAbase:
             self.base = np.random.rand(n_sources, n_bins, n_bases)
             self.activation = np.random.rand(n_sources, n_bases, n_frames)
         
-    def __call__(self, input, iteration=100):
+    def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
             input (n_channels, n_bins, n_frames)
@@ -53,7 +56,7 @@ class ILRMAbase:
         """
         self.input = input
 
-        self._reset()
+        self._reset(**kwargs)
 
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
@@ -110,7 +113,7 @@ class GaussILRMA(ILRMAbase):
 
         # TODO: domain
     
-    def __call__(self, input, iteration=100):
+    def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
             input (n_channels, n_bins, n_frames)
@@ -119,7 +122,7 @@ class GaussILRMA(ILRMAbase):
         """
         self.input = input
 
-        self._reset()
+        self._reset(**kwargs)
 
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
@@ -344,7 +347,7 @@ class tILRMA(ILRMAbase):
 
         # TODO: domain
     
-    def __call__(self, input, iteration=100):
+    def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
             input (n_channels, n_bins, n_frames)
@@ -353,7 +356,7 @@ class tILRMA(ILRMAbase):
         """
         self.input = input
 
-        self._reset()
+        self._reset(**kwargs)
 
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
@@ -563,7 +566,7 @@ class KLILRMA(ILRMAbase):
 
         raise NotImplementedError("Implement KL-ILRMA")
     
-    def __call__(self, input, iteration=100):
+    def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
             input (n_channels, n_bins, n_frames)
@@ -572,7 +575,7 @@ class KLILRMA(ILRMAbase):
         """
         self.input = input
 
-        self._reset()
+        self._reset(**kwargs)
 
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
