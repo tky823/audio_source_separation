@@ -13,8 +13,11 @@ class IVAbase:
         self.input = None
         self.loss = []
     
-    def _reset(self):
+    def _reset(self, **kwargs):
         assert self.input is not None, "Specify data!"
+
+        for key in kwargs.keys():
+            setattr(self, key, kwargs[key])
 
         X = self.input
 
@@ -28,7 +31,7 @@ class IVAbase:
         self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
         self.estimation = self.separate(X, demix_filter=W)
         
-    def __call__(self, input, iteration=100):
+    def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
             input (n_channels, n_bins, n_frames)
@@ -37,7 +40,7 @@ class IVAbase:
         """
         self.input = input
 
-        self._reset()
+        self._reset(**kwargs)
 
         loss = self.compute_negative_loglikelihood()
         self.loss.append(loss)
@@ -83,7 +86,7 @@ class GradIVAbase(IVAbase):
         self.lr = lr
         self.reference_id = reference_id
     
-    def __call__(self, input, iteration=100):
+    def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
             input (n_channels, n_bins, n_frames)
@@ -92,7 +95,7 @@ class GradIVAbase(IVAbase):
         """
         self.input = input
 
-        self._reset()
+        self._reset(**kwargs)
 
         loss = self.compute_negative_loglikelihood()
         self.loss.append(loss)
@@ -215,7 +218,7 @@ class AuxIVAbase(IVAbase):
         self.reference_id = reference_id
         self.threshold = threshold
     
-    def __call__(self, input, iteration=100):
+    def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
             input (n_channels, n_bins, n_frames)
@@ -224,7 +227,7 @@ class AuxIVAbase(IVAbase):
         """
         self.input = input
 
-        self._reset()
+        self._reset(**kwargs)
 
         loss = self.compute_negative_loglikelihood()
         self.loss.append(loss)
