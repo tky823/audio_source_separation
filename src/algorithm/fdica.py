@@ -223,6 +223,7 @@ class NaturalGradLaplaceFDICA(GradFDICAbase):
         if self.is_holonomic:
             delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
         else:
+            raise NotImplementedError("only suports for is_holonomic = True")
             offdiag_mask = 1 - eye
             delta = offdiag_mask * ((Phi @ Y_Hermite) / n_frames) @ W
         
