@@ -1,5 +1,6 @@
 import numpy as np
 
+from algorithm.stft import stft, istft
 from algorithm.projection_back import projection_back
 
 EPS=1e-12
@@ -153,6 +154,8 @@ class GaussILRMA(ILRMAbase):
         self.update_space_model()
 
         X, W = self.input, self.demix_filter
+        T = self.base
+
         Y = self.separate(X, demix_filter=W)
         self.estimation = Y
         
@@ -168,17 +171,14 @@ class GaussILRMA(ILRMAbase):
 
                 if self.partitioning:
                     Z = self.latent
-                    T = self.base
+                    
                     Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
                     Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
                     T = T * Zauxsum # (n_bins, n_bases)
                     Z = Zaux / Zauxsum # (n_sources, n_bases)
                     self.latent = Z
-                    self.base = T
                 else:
-                    T = self.base
                     T = T / (aux[:,np.newaxis,np.newaxis]**2)
-                    self.base = T
             elif self.normalize == 'projection-back':
                 if self.partitioning:
                     raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
@@ -189,9 +189,10 @@ class GaussILRMA(ILRMAbase):
                 W = Y.transpose(1,0,2) @ X_Hermite @ np.linalg.inv(X @ X_Hermite) # (n_bins, n_sources, n_channels)
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
-            
+
             self.demix_filter = W
             self.estimation = Y
+            self.base = T
     
     def update_source_model(self):
         eps = self.eps
@@ -605,7 +606,6 @@ class RegularizedILRMA(ILRMAbase):
     See https://ieeexplore.ieee.org/document/7486081
     """
     def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
         """
         Args:
             normalize <str>
@@ -613,6 +613,85 @@ class RegularizedILRMA(ILRMAbase):
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
         self.reference_id = reference_id
+
+        raise NotImplementedError("Implement Regularized ILRMA")
+
+class ConsistentGaussILRMA(GaussILRMA):
+    """
+    Reference: "Consistent independent low-rank matrix analysis for determined blind source separation"
+    See https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-020-00704-4
+    """
+    def __init__(self, n_bases=10, partitioning=False, reference_id=0, fft_size=None, hop_size=None, callback=None, eps=EPS, threshold=THRESHOLD):
+        """
+        Args:
+            normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
+            threshold <float>: threshold for condition number when computing (WU)^{-1}.
+        """
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=False, reference_id=reference_id, threshold=threshold, callback=callback, eps=eps)
+
+        if fft_size is None:
+            raise ValueError("Specify `fft_size`.")
+        
+        if hop_size is None:
+            hop_size = fft_size // 2
+        
+        self.fft_size, self.hop_size = fft_size, hop_size
+
+    def __call__(self, input, iteration=100, **kwargs):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset(**kwargs)
+
+        loss = self.compute_negative_loglikelihood()    
+        self.loss.append(loss)
+
+        for idx in range(iteration):
+            self.update_once()
+
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
+            if self.callback is not None:
+                self.callback(self)
+        
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        self.estimation = output
+
+        return output
+    
+    def update_once(self):
+        y = istft(self.estimation, fft_size=self.fft_size, hop_size=self.hop_size)
+        self.estimation = stft(y, fft_size=self.fft_size, hop_size=self.hop_size)
+
+        self.update_source_model()
+        self.update_space_model()
+
+        X, W = self.input, self.demix_filter
+        T = self.base
+        Y = self.separate(X, demix_filter=W)
+
+        if self.partitioning:
+            raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
+        scale = projection_back(Y, reference=X[self.reference_id])
+        transposed_scale = scale.transpose(1,0) # (n_sources, n_bins) -> (n_bins, n_sources)
+        W = W * transposed_scale[...,np.newaxis] # (n_bins, n_sources, n_channels)
+        Y = self.separate(X, demix_filter=W)
+        T = T * np.abs(scale[...,np.newaxis])**2
+
+        self.demix_filter = W
+        self.estimation = Y
+        self.base = T
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
@@ -697,6 +776,49 @@ def _test(method, n_bases=10, partitioning=False):
     plt.savefig('data/ILRMA/{}ILMRA/partitioning{}/loss.png'.format(method, int(partitioning)), bbox_inches='tight')
     plt.close()
 
+def _test_consistent_ilrma(n_bases=10, partitioning=False):
+    np.random.seed(111)
+    
+    # Room impulse response
+    sr = 16000
+    reverb = 0.16
+    duration = 0.5
+    samples = int(duration * sr)
+    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
+    mic_indices = [2, 5]
+    degrees = [60, 300]
+    titles = ['man-16000', 'woman-16000']
+
+    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
+
+    n_sources, T = mixed_signal.shape
+    
+    # STFT
+    fft_size, hop_size = 2048, 1024
+    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
+
+    # ILRMA
+    n_channels = len(titles)
+    iteration = 200
+    
+    ilrma = ConsistentGaussILRMA(n_bases=n_bases, partitioning=partitioning, fft_size=fft_size, hop_size=hop_size)
+    estimation = ilrma(mixture, iteration=iteration)
+
+    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
+    
+    print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
+
+    for idx in range(n_channels):
+        _estimated_signal = estimated_signal[idx]
+        write_wav("data/ILRMA/ConsistentGaussILMRA/partitioning{}/mixture-{}_estimated-iter{}-{}.wav".format(int(partitioning), sr, iteration, idx), signal=_estimated_signal, sr=sr)
+    
+    plt.figure()
+    plt.plot(ilrma.loss, color='black')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.savefig('data/ILRMA/ConsistentGaussILMRA/partitioning{}/loss.png'.format(int(partitioning)), bbox_inches='tight')
+    plt.close()  
+
 def _test_conv():
     sr = 16000
     reverb = 0.16
@@ -717,7 +839,6 @@ if __name__ == '__main__':
     from scipy.io import loadmat
 
     from utils.utils_audio import read_wav, write_wav
-    from algorithm.stft import stft, istft
 
     plt.rcParams['figure.dpi'] = 200
 
@@ -726,6 +847,8 @@ if __name__ == '__main__':
     os.makedirs("data/ILRMA/GaussILMRA/partitioning1", exist_ok=True)
     os.makedirs("data/ILRMA/tILMRA/partitioning0", exist_ok=True)
     os.makedirs("data/ILRMA/tILMRA/partitioning1", exist_ok=True)
+    os.makedirs("data/ILRMA/ConsistentGaussILMRA/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/ConsistentGaussILMRA/partitioning1", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
@@ -733,7 +856,8 @@ if __name__ == '__main__':
     """
 
     # _test_conv()
-    _test(method='Gauss', n_bases=2, partitioning=False)
-    _test(method='Gauss', n_bases=5, partitioning=True)
+    # _test(method='Gauss', n_bases=2, partitioning=False)
+    # _test(method='Gauss', n_bases=5, partitioning=True)
     #_test(method='t', n_bases=2, partitioning=False)
     #_test(method='t', n_bases=5, partitioning=True)
+    _test_consistent_ilrma(n_bases=5, partitioning=False)
