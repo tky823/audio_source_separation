@@ -687,7 +687,7 @@ class ConsistentGaussILRMA(GaussILRMA):
         transposed_scale = scale.transpose(1,0) # (n_sources, n_bins) -> (n_bins, n_sources)
         W = W * transposed_scale[...,np.newaxis] # (n_bins, n_sources, n_channels)
         Y = self.separate(X, demix_filter=W)
-        T = T * (scale[...,np.newaxis]**2)
+        T = T * np.abs(scale[...,np.newaxis])**2
 
         self.demix_filter = W
         self.estimation = Y
