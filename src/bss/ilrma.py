@@ -187,7 +187,6 @@ class GaussILRMA(ILRMAbase):
                 X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
                 X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
                 W = Y.transpose(1,0,2) @ X_Hermite @ np.linalg.inv(X @ X_Hermite) # (n_bins, n_sources, n_channels)
-                # T = T * (scale[...,np.newaxis]**2)
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
 
@@ -622,13 +621,13 @@ class ConsistentGaussILRMA(GaussILRMA):
     Reference: "Consistent independent low-rank matrix analysis for determined blind source separation"
     See https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-020-00704-4
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, fft_size=None, hop_size=None, callback=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_bases=10, partitioning=False,, reference_id=0, fft_size=None, hop_size=None, callback=None, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, reference_id=reference_id, threshold=threshold, callback=callback, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=False, reference_id=reference_id, threshold=threshold, callback=callback, eps=eps)
 
         if fft_size is None:
             raise ValueError("Specify `fft_size`.")
@@ -675,7 +674,24 @@ class ConsistentGaussILRMA(GaussILRMA):
         y = istft(self.estimation, fft_size=self.fft_size, hop_size=self.hop_size)
         self.estimation = stft(y, fft_size=self.fft_size, hop_size=self.hop_size)
 
-        super().update_once()
+        self.update_source_model()
+        self.update_space_model()
+
+        X, W = self.input, self.demix_filter
+        T = self.base
+        Y = self.separate(X, demix_filter=W)
+
+        if self.partitioning:
+            raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
+        scale = projection_back(Y, reference=X[self.reference_id])
+        transposed_scale = scale.transpose(1,0) # (n_sources, n_bins) -> (n_bins, n_sources)
+        W = W * transposed_scale[...,np.newaxis] # (n_bins, n_sources, n_channels)
+        Y = self.separate(X, demix_filter=W)
+        T = T * (scale[...,np.newaxis]**2)
+
+        self.demix_filter = W
+        self.estimation = Y
+        self.base = T
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
