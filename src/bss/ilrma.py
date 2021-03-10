@@ -153,6 +153,8 @@ class GaussILRMA(ILRMAbase):
         self.update_space_model()
 
         X, W = self.input, self.demix_filter
+        T = self.base
+
         Y = self.separate(X, demix_filter=W)
         self.estimation = Y
         
@@ -168,17 +170,14 @@ class GaussILRMA(ILRMAbase):
 
                 if self.partitioning:
                     Z = self.latent
-                    T = self.base
+                    
                     Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
                     Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
                     T = T * Zauxsum # (n_bins, n_bases)
                     Z = Zaux / Zauxsum # (n_sources, n_bases)
                     self.latent = Z
-                    self.base = T
                 else:
-                    T = self.base
                     T = T / (aux[:,np.newaxis,np.newaxis]**2)
-                    self.base = T
             elif self.normalize == 'projection-back':
                 if self.partitioning:
                     raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
@@ -187,11 +186,13 @@ class GaussILRMA(ILRMAbase):
                 X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
                 X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
                 W = Y.transpose(1,0,2) @ X_Hermite @ np.linalg.inv(X @ X_Hermite) # (n_bins, n_sources, n_channels)
+                T = T * (scale[...,np.newaxis]**2)
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
-            
+
             self.demix_filter = W
             self.estimation = Y
+            self.base = T
     
     def update_source_model(self):
         eps = self.eps
@@ -634,10 +635,7 @@ class ConsistentGaussILRMA(GaussILRMA):
         if hop_size is None:
             hop_size = fft_size // 2
         
-        self.fft_size = fft_size
-        self.hop_size = hop_size
-
-        raise NotImplementedError("Implement Consistent-ILRMA")
+        self.fft_size, self.hop_size = fft_size, hop_size
 
     def __call__(self, input, iteration=100, **kwargs):
         """
