@@ -1,5 +1,6 @@
 import numpy as np
 
+from algorithm.stft import stft, istft
 from algorithm.projection_back import projection_back
 
 EPS=1e-12
@@ -822,7 +823,6 @@ if __name__ == '__main__':
     from scipy.io import loadmat
 
     from utils.utils_audio import read_wav, write_wav
-    from algorithm.stft import stft, istft
 
     plt.rcParams['figure.dpi'] = 200
 
