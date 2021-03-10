@@ -198,8 +198,10 @@ class GradLaplaceFDICA(GradFDICAbase):
         return loss
 
 class NaturalGradLaplaceFDICA(GradFDICAbase):
-    def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, lr=1e-1, reference_id=0, is_holonomic=True, callback=None, eps=EPS):
         super().__init__(lr=lr, reference_id=reference_id, callback=callback, eps=eps)
+
+        self.is_holonomic = is_holonomic
 
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -218,7 +220,13 @@ class NaturalGradLaplaceFDICA(GradFDICAbase):
         denominator[denominator < eps] = eps
         Phi = Y / denominator # (n_bins, n_sources, n_frames)
 
-        delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
+        if self.is_holonomic:
+            delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
+        else:
+            raise NotImplementedError("only suports for is_holonomic = True")
+            offdiag_mask = 1 - eye
+            delta = offdiag_mask * ((Phi @ Y_Hermite) / n_frames) @ W
+        
         W = W - lr * delta # (n_bins, n_sources, n_channels)
 
         Y = self.separate(X, demix_filter=W)
