@@ -621,7 +621,7 @@ class ConsistentGaussILRMA(GaussILRMA):
     Reference: "Consistent independent low-rank matrix analysis for determined blind source separation"
     See https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-020-00704-4
     """
-    def __init__(self, n_bases=10, partitioning=False,, reference_id=0, fft_size=None, hop_size=None, callback=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_bases=10, partitioning=False, reference_id=0, fft_size=None, hop_size=None, callback=None, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
