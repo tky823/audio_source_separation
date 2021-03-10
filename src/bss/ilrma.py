@@ -672,8 +672,8 @@ class ConsistentGaussILRMA(GaussILRMA):
         return output
     
     def update_once(self):
-        y = istft(self.estimation)
-        self.estimation = stft(y)
+        y = istft(self.estimation, fft_size=self.fft_size, hop_size=self.hop_size)
+        self.estimation = stft(y, fft_size=self.fft_size, hop_size=self.hop_size)
 
         super().update_once()
 
