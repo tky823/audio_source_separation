@@ -187,7 +187,7 @@ class GaussILRMA(ILRMAbase):
                 X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
                 X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
                 W = Y.transpose(1,0,2) @ X_Hermite @ np.linalg.inv(X @ X_Hermite) # (n_bins, n_sources, n_channels)
-                T = T * (scale[...,np.newaxis]**2)
+                # T = T * (scale[...,np.newaxis]**2)
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
 
