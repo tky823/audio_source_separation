@@ -22,10 +22,10 @@ class NMFbase:
         eps = self.eps
 
         self.target = target
-        F_bin, T_bin = target.shape
+        n_bins, n_frames = target.shape
 
-        self.base = np.random.rand(F_bin, n_bases)
-        self.activation = np.random.rand(n_bases, T_bin)
+        self.base = np.random.rand(n_bins, n_bases)
+        self.activation = np.random.rand(n_bases, n_frames)
 
         for idx in range(iteration):
             self.update_once()
@@ -62,11 +62,11 @@ class ComplexNMFbase:
         eps = self.eps
 
         self.target = target
-        F_bin, T_bin = target.shape
+        n_bins, n_frames = target.shape
 
-        self.base = np.random.rand(F_bin, n_bases)
-        self.activation = np.random.rand(n_bases, T_bin)
-        self.phase = 2 * np.pi * np.random.rand(F_bin, n_bases, T_bin)
+        self.base = np.random.rand(n_bins, n_bases)
+        self.activation = np.random.rand(n_bases, n_frames)
+        self.phase = 2 * np.pi * np.random.rand(n_bins, n_bases, n_frames)
 
         for idx in range(iteration):
             self.update_once()
@@ -149,17 +149,37 @@ class KLNMF(NMFbase):
         self.base, self.activation = T, V
 
 class ISNMF(NMFbase):
-    def __init__(self, n_bases=2, eps=EPS):
+    def __init__(self, n_bases=2, domain=2, eps=EPS):
         """
         Args:
             K: number of bases
         """
         super().__init__(n_bases=n_bases, eps=eps)
 
+        self.domain = domain
         self.criterion = is_divergence
+    
+    def update(self, target, iteration=100):
+        n_bases = self.n_bases
+        domain = self.domain
+        eps = self.eps
+
+        self.target = target
+        n_bins, n_frames = target.shape
+
+        self.base = np.random.rand(n_bins, n_bases)
+        self.activation = np.random.rand(n_bases, n_frames)
+
+        for idx in range(iteration):
+            self.update_once()
+
+            TV = (self.base @ self.activation)**(2 / domain)
+            loss = self.criterion(TV, target)
+            self.loss.append(loss.sum())
 
     def update_once(self):
         target = self.target
+        domain = self.domain
         eps = self.eps
 
         T, V = self.base, self.activation
@@ -168,19 +188,19 @@ class ISNMF(NMFbase):
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
-        division, TV_inverse = target / (TV**2), 1 / TV
+        division, TV_inverse = target / (TV**((domain + 2) / domain)), 1 / TV
         TVV = TV_inverse @ V_transpose
         TVV[TVV < eps] = eps
-        T = T * np.sqrt(division @ V_transpose / TVV)
+        T = T * (division @ V_transpose / TVV)**(domain / (domain + 2))
 
         # Update activations
         T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
-        division, TV_inverse = target / (TV**2), 1 / TV
+        division, TV_inverse = target / (TV**((domain + 2) / domain)), 1 / TV
         TTV = T_transpose @ TV_inverse
         TTV[TTV < eps] = eps
-        V = V * np.sqrt(T_transpose @ division / TTV)
+        V = V * (T_transpose @ division / TTV)**(domain / (domain + 2))
 
         self.base, self.activation = T, V
 
@@ -274,6 +294,7 @@ def _test(metric='EUC'):
 
     fft_size, hop_size = 1024, 256
     n_bases = 6
+    domain = 2
     iteration = 100
     
     signal, sr = read_wav("data/single-channel/music-8000.wav")
@@ -287,7 +308,8 @@ def _test(metric='EUC'):
     if metric == 'EUC':
         nmf = EUCNMF(n_bases)
     elif metric == 'IS':
-        nmf = ISNMF(n_bases)
+        domain = 1
+        nmf = ISNMF(n_bases, domain=domain)
     elif metric == 'KL':
         nmf = KLNMF(n_bases)
     else:
@@ -297,7 +319,7 @@ def _test(metric='EUC'):
 
     amplitude[amplitude < EPS] = EPS
 
-    estimated_power = nmf.base @ nmf.activation
+    estimated_power = (nmf.base @ nmf.activation)**(2 / domain)
     estimated_amplitude = np.sqrt(estimated_power)
     ratio = estimated_amplitude / amplitude
     estimated_spectrogram = ratio * spectrogram
@@ -316,7 +338,7 @@ def _test(metric='EUC'):
     plt.close()
 
     for idx in range(n_bases):
-        estimated_power = nmf.base[:, idx: idx+1] @ nmf.activation[idx: idx+1, :]
+        estimated_power = (nmf.base[:, idx: idx+1] @ nmf.activation[idx: idx+1, :])**(2 / domain)
         estimated_amplitude = np.sqrt(estimated_power)
         ratio = estimated_amplitude / amplitude
         estimated_spectrogram = ratio * spectrogram
