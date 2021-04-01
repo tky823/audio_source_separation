@@ -37,7 +37,7 @@ class NMFbase:
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function")
 
-class CNMFbase:
+class ComplexNMFbase:
     def __init__(self, n_bases=2, regularizer=0.1, eps=EPS):
         """
         Args:
@@ -184,7 +184,7 @@ class ISNMF(NMFbase):
 
         self.base, self.activation = T, V
 
-class EUCCNMF(CNMFbase):
+class ComplexEUCNMF(ComplexNMFbase):
     def __init__(self, n_bases=2, regularizer=0.1, p=1, eps=EPS):
         """
         Args:
@@ -356,7 +356,7 @@ def _test_cnmf(metric='EUC'):
     regularizer = 1e-5 * np.sum(np.abs(spectrogram)**2) / (n_bases**(1 - 2 / p))
     
     if metric == 'EUC':
-        nmf = EUCCNMF(n_bases, regularizer=regularizer, p=p)
+        nmf = ComplexEUCNMF(n_bases, regularizer=regularizer, p=p)
     else:
         raise NotImplementedError("Not support {}-NMF".format(metric))
     
