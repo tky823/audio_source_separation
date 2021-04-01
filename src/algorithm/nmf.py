@@ -144,7 +144,6 @@ class EUCNMF(NMFbase):
 
         self.base, self.activation = T, V
 
-
 class KLNMF(NMFbase):
     def __init__(self, n_bases=2, domain=2, algorithm='mm', eps=EPS):
         """
@@ -305,6 +304,85 @@ class ISNMF(NMFbase):
         TTV = T_transpose @ TV_inverse
         TTV[TTV < eps] = eps
         V = V * (T_transpose @ division / TTV)
+
+        self.base, self.activation = T, V
+
+class tNMF(NMFbase):
+    def __init__(self, n_bases=2, nu=1e+3, domain=2, algorithm='mm', eps=EPS):
+        """
+        Args:
+            K: number of bases
+            algorithm: 'mm': MM algorithm based update
+        """
+        super().__init__(n_bases=n_bases, eps=eps)
+
+        def t_divergence(input, target):
+            # TODO: implement criterion
+            _input, _target = input + eps, target + eps
+            
+            return np.log(_input) + (2 + self.nu) / 2 * np.log(1 + (2 / nu) * (_target / _input))
+
+        assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
+
+        self.nu = nu
+        self.domain = domain
+        self.algorithm = algorithm
+        self.criterion = t_divergence
+    
+    def update(self, target, iteration=100):
+        n_bases = self.n_bases
+        domain = self.domain
+        eps = self.eps
+
+        self.target = target
+        n_bins, n_frames = target.shape
+
+        self.base = np.random.rand(n_bins, n_bases)
+        self.activation = np.random.rand(n_bases, n_frames)
+
+        for idx in range(iteration):
+            self.update_once()
+
+            TV = (self.base @ self.activation)**(2 / domain)
+            loss = self.criterion(TV, target)
+            self.loss.append(loss.sum())
+
+    def update_once(self):
+        if self.algorithm == 'mm':
+            self.update_once_mm()
+        else:
+            raise ValueError("Not support {} based update.".format(self.algorithm))
+    
+    def update_once_mm(self):
+        target = self.target
+        domain = self.domain
+        nu = self.nu
+        eps = self.eps
+
+        assert domain == 2, "`domain` is expected 2."
+
+        T, V = self.base, self.activation
+        Z = np.maximum(target, eps)
+
+        # Update bases
+        V_transpose = V.transpose(1, 0)
+        TV = T @ V
+        TV[TV < eps] = eps
+        harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * Z))
+        division, TV_inverse = harmonic / (TV**2), 1 / TV
+        TVV = TV_inverse @ V_transpose
+        TVV[TVV < eps] = eps
+        T = T * np.sqrt(division @ V_transpose / TVV)
+
+        # Update activations
+        T_transpose = T.transpose(1, 0)
+        TV = T @ V
+        TV[TV < eps] = eps
+        harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * Z))
+        division, TV_inverse = harmonic / (TV**2), 1 / TV
+        TTV = T_transpose @ TV_inverse
+        TTV[TTV < eps] = eps
+        V = V * np.sqrt(T_transpose @ division / TTV)
 
         self.base, self.activation = T, V
 
@@ -586,6 +664,10 @@ def _test(metric='EUC', algorithm='mm'):
     elif metric == 'IS':
         iteration = 50
         nmf = ISNMF(n_bases, domain=domain, algorithm=algorithm)
+    elif metric == 't':
+        iteration = 50
+        nu = 100
+        nmf = tNMF(n_bases, nu=nu, domain=domain, algorithm=algorithm)
     elif metric == 'Cauchy':
         iteration = 20
         nmf = CauchyNMF(n_bases, domain=domain, algorithm=algorithm)
@@ -716,6 +798,7 @@ if __name__ == '__main__':
     os.makedirs('data/NMF/KL/mm', exist_ok=True)
     os.makedirs('data/NMF/IS/mm', exist_ok=True)
     os.makedirs('data/NMF/IS/me', exist_ok=True)
+    os.makedirs('data/NMF/t/mm', exist_ok=True)
     os.makedirs('data/NMF/Cauchy/naive-multipricative', exist_ok=True)
     os.makedirs('data/NMF/Cauchy/mm', exist_ok=True)
     os.makedirs('data/NMF/Cauchy/me', exist_ok=True)
@@ -725,6 +808,7 @@ if __name__ == '__main__':
     _test(metric='KL', algorithm='mm')
     _test(metric='IS', algorithm='mm')
     _test(metric='IS', algorithm='me')
+    _test(metric='t', algorithm='mm')
     _test(metric='Cauchy', algorithm='naive-multipricative')
     _test(metric='Cauchy', algorithm='mm')
     _test(metric='Cauchy', algorithm='me')
