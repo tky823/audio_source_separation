@@ -101,7 +101,7 @@ class GaussILRMA(ILRMAbase):
     Reference: "Determined Blind Source Separation Unifying Independent Vector Analysis and Nonnegative Matrix Factorization"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_bases=10, domain=2, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
@@ -109,10 +109,11 @@ class GaussILRMA(ILRMAbase):
         """
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
+        assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
+
+        self.domain = domain
         self.reference_id = reference_id
         self.threshold = threshold
-
-        # TODO: domain
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -195,6 +196,7 @@ class GaussILRMA(ILRMAbase):
             self.base = T
     
     def update_source_model(self):
+        domain = self.domain
         eps = self.eps
 
         X, W = self.input, self.demix_filter
@@ -202,6 +204,8 @@ class GaussILRMA(ILRMAbase):
         P = np.abs(Y)**2
         
         if self.partitioning:
+            assert domain == 2, "Not support domain = {}".format(domain)
+
             Z = self.latent # (n_sources, n_bases)
             T, V = self.base, self.activation
 
@@ -247,30 +251,34 @@ class GaussILRMA(ILRMAbase):
             V_transpose = V.transpose(0,2,1)
             TV = T @ V
             TV[TV < eps] = eps
-            division, TV_inverse = P / (TV**2), 1 / TV
+            division, TV_inverse = P / (TV**((domain + 2) / domain)), 1 / TV
             TVV = TV_inverse @ V_transpose
             TVV[TVV < eps] = eps
-            T = T * np.sqrt(division @ V_transpose / TVV)
+            T = T * (division @ V_transpose / TVV)**(domain / (domain + 2))
             
             # Update activations
             T_transpose = T.transpose(0,2,1)
             TV = T @ V
             TV[TV < eps] = eps
-            division, TV_inverse = P / (TV**2), 1 / TV
+            division, TV_inverse = P / (TV**((domain + 2) / domain)), 1 / TV
             TTV = T_transpose @ TV_inverse
             TTV[TTV < eps] = eps
-            V = V * np.sqrt(T_transpose @ division / TTV)
+            V = V * (T_transpose @ division / TTV)**(domain / (domain + 2))
 
             self.base, self.activation = T, V
 
     def update_space_model(self):
         n_sources, n_channels = self.n_sources, self.n_channels
         n_bins = self.n_bins
+
+        domain = self.domain
         eps, threshold = self.eps, self.threshold
 
         X, W = self.input, self.demix_filter
         
         if self.partitioning:
+            assert domain == 2, "Not support domain = {}".format(domain)
+
             Z = self.latent
             T, V = self.base, self.activation
             ZTV = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
@@ -278,7 +286,7 @@ class GaussILRMA(ILRMAbase):
         else:
             T, V = self.base, self.activation
             TV = T @ V
-            R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+            R = (TV[...,np.newaxis, np.newaxis])**(2 / domain) # (n_sources, n_bins, n_frames, 1, 1)
         
         X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
         X = X[...,np.newaxis]
@@ -309,6 +317,7 @@ class GaussILRMA(ILRMAbase):
 
     def compute_negative_loglikelihood(self):
         n_frames = self.n_frames
+        domain = self.domain
         eps = self.eps
 
         X, W = self.input, self.demix_filter
@@ -317,12 +326,14 @@ class GaussILRMA(ILRMAbase):
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
 
         if self.partitioning:
+            assert domain == 2, "Not support domain = {}".format(domain)
+
             Z = self.latent
             T, V = self.base, self.activation
             R = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
         else:
             T, V = self.base, self.activation
-            R = T @ V # (n_sources, n_bins, n_frames)
+            R = (T @ V)**(2 / domain) # (n_sources, n_bins, n_frames)
         
         R[R < eps] = eps
         loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
@@ -728,7 +739,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
     return mixed_signals
 
-def _test(method, n_bases=10, partitioning=False):
+def _test(method, n_bases=10, domain=2, partitioning=False):
     np.random.seed(111)
     
     # Room impulse response
@@ -754,7 +765,7 @@ def _test(method, n_bases=10, partitioning=False):
     iteration = 200
 
     if method == 'Gauss':
-        ilrma = GaussILRMA(n_bases=n_bases, partitioning=partitioning)
+        ilrma = GaussILRMA(n_bases=n_bases, domain=domain, partitioning=partitioning)
     elif method == 't':
         ilrma = tILRMA(n_bases=n_bases, partitioning=partitioning)
     else:
