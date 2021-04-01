@@ -79,17 +79,21 @@ class ComplexNMFbase:
         raise NotImplementedError("Implement 'update_once' method")
 
 class EUCNMF(NMFbase):
-    def __init__(self, n_bases=2, eps=EPS):
+    def __init__(self, n_bases=2, domain=2, eps=EPS):
         """
         Args:
             n_bases: number of bases
         """
         super().__init__(n_bases=n_bases, eps=eps)
 
-        self.criterion = lambda input, target: (input - target)**2
+        assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
+
+        self.domain = domain
+        self.criterion = lambda input, target: (target - input**(2 / domain))**2
 
     def update_once(self):
         target = self.target
+        domain = self.domain
         eps = self.eps
 
         T, V = self.base, self.activation
@@ -98,17 +102,19 @@ class EUCNMF(NMFbase):
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
-        TVV = TV @ V_transpose
+        TVV = (TV**((4 - domain) / domain)) @ V_transpose
         TVV[TVV < eps] = eps
-        T = T * (target @ V_transpose / TVV)
+        numerator = (target * (TV**((2 - domain) / domain))) @ V_transpose
+        T = T * (numerator / TVV)**(domain / (4 - domain))
 
         # Update activations
         T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
-        TTV = T_transpose @ TV
+        TTV = T_transpose @ (TV**((4 - domain) / domain))
         TTV[TTV < eps] = eps
-        V = V * (T_transpose @ target / TTV)
+        numerator = T_transpose @ (target * (TV**((2 - domain) / domain)))
+        V = V * (numerator / TTV)**(domain / (4 - domain))
 
         self.base, self.activation = T, V
 
@@ -155,6 +161,8 @@ class ISNMF(NMFbase):
             K: number of bases
         """
         super().__init__(n_bases=n_bases, eps=eps)
+
+        assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
 
         self.domain = domain
         self.criterion = is_divergence
@@ -306,7 +314,7 @@ def _test(metric='EUC'):
     power = amplitude**2
 
     if metric == 'EUC':
-        nmf = EUCNMF(n_bases)
+        nmf = EUCNMF(n_bases, domain=domain)
     elif metric == 'IS':
         domain = 1
         nmf = ISNMF(n_bases, domain=domain)
