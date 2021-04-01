@@ -89,7 +89,25 @@ class EUCNMF(NMFbase):
         assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
 
         self.domain = domain
-        self.criterion = lambda input, target: (target - input**(2 / domain))**2
+        self.criterion = lambda input, target: (target - input)**2
+    
+    def update(self, target, iteration=100):
+        n_bases = self.n_bases
+        domain = self.domain
+        eps = self.eps
+
+        self.target = target
+        n_bins, n_frames = target.shape
+
+        self.base = np.random.rand(n_bins, n_bases)
+        self.activation = np.random.rand(n_bases, n_frames)
+
+        for idx in range(iteration):
+            self.update_once()
+
+            TV = (self.base @ self.activation)**(2 / domain)
+            loss = self.criterion(TV, target)
+            self.loss.append(loss.sum())
 
     def update_once(self):
         target = self.target
@@ -119,17 +137,39 @@ class EUCNMF(NMFbase):
         self.base, self.activation = T, V
 
 class KLNMF(NMFbase):
-    def __init__(self, n_bases=2, eps=EPS):
+    def __init__(self, n_bases=2, domain=2, eps=EPS):
         """
         Args:
             K: number of bases
         """
         super().__init__(n_bases=n_bases, eps=eps)
 
+        assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
+
+        self.domain = domain
         self.criterion = generalized_kl_divergence
+    
+    def update(self, target, iteration=100):
+        n_bases = self.n_bases
+        domain = self.domain
+        eps = self.eps
+
+        self.target = target
+        n_bins, n_frames = target.shape
+
+        self.base = np.random.rand(n_bins, n_bases)
+        self.activation = np.random.rand(n_bases, n_frames)
+
+        for idx in range(iteration):
+            self.update_once()
+
+            TV = (self.base @ self.activation)**(2 / domain)
+            loss = self.criterion(TV, target)
+            self.loss.append(loss.sum())
 
     def update_once(self):
         target = self.target
+        domain = self.domain
         eps = self.eps
 
         T, V = self.base, self.activation
@@ -138,19 +178,19 @@ class KLNMF(NMFbase):
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
-        Vsum = V_transpose.sum(axis=0, keepdims=True)
-        Vsum[Vsum < eps] = eps
+        TVV = (TV**((2 - domain) / domain)) @ V_transpose
+        TVV[TVV < eps] = eps
         division = target / TV
-        T = T * (division @ V_transpose / Vsum)
+        T = T * (division @ V_transpose / TVV)**(domain / 2)
 
         # Update activations
         T_transpose = T.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
-        Tsum = T_transpose.sum(axis=1, keepdims=True)
-        Tsum[Tsum < eps] = eps
+        TTV = T_transpose @ (TV**((2 - domain) / domain))
+        TTV[TTV < eps] = eps
         division = target / TV
-        V = V * (T_transpose @ division / Tsum)
+        V = V * (T_transpose @ division / TTV)**(domain / 2)
 
         self.base, self.activation = T, V
 
@@ -319,7 +359,8 @@ def _test(metric='EUC'):
         domain = 1
         nmf = ISNMF(n_bases, domain=domain)
     elif metric == 'KL':
-        nmf = KLNMF(n_bases)
+        domain = 1.5
+        nmf = KLNMF(n_bases, domain=domain)
     else:
         raise NotImplementedError("Not support {}-NMF".format(metric))
 
