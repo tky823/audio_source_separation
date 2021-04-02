@@ -322,18 +322,17 @@ class GaussILRMA(ILRMAbase):
 
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
-
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
 
         if self.partitioning:
-            assert domain == 2, "Not support domain = {}".format(domain)
-
             Z = self.latent
             T, V = self.base, self.activation
-            R = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
+            ZTV = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
+            R = ZTV**(2 / domain)
         else:
             T, V = self.base, self.activation
-            R = (T @ V)**(2 / domain) # (n_sources, n_bins, n_frames)
+            TV = T @ V # (n_sources, n_bins, n_frames)
+            R = TV**(2 / domain)
         
         R[R < eps] = eps
         loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
@@ -345,7 +344,7 @@ class tILRMA(ILRMAbase):
     Reference: "Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation"
     See: https://ieeexplore.ieee.org/document/8168129
     """
-    def __init__(self, n_bases=10, nu=1.0, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, nu=1, domain=2, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
         """
         Args:
             nu: degree of freedom. nu = 1: Cauchy distribution, nu -> infty: Gaussian distribution.
@@ -355,9 +354,8 @@ class tILRMA(ILRMAbase):
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
         self.nu = nu
+        self.domain = domain
         self.reference_id = reference_id
-
-        # TODO: domain
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -429,7 +427,11 @@ class tILRMA(ILRMAbase):
             self.estimation = Y
 
     def update_source_model(self):
+        nu = self.nu
+        domain = self.domain
         eps = self.eps
+
+        assert domain == 2, "Only domain = 2 is supported."
 
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
@@ -479,27 +481,29 @@ class tILRMA(ILRMAbase):
             self.base, self.activation = T, V
         else:
             T, V = self.base, self.activation
+            Z = np.maximum(P, eps)
 
             # Update bases
-            V_transpose = V.transpose(0,2,1)
+            V_transpose = V.transpose(1, 0)
             TV = T @ V
             TV[TV < eps] = eps
-            division, TV_inverse = P / (TV**2), 1 / TV
+            harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * Z))
+            division, TV_inverse = harmonic / (TV**2), 1 / TV
             TVV = TV_inverse @ V_transpose
             TVV[TVV < eps] = eps
             T = T * np.sqrt(division @ V_transpose / TVV)
-            
+
             # Update activations
-            T_transpose = T.transpose(0,2,1)
+            T_transpose = T.transpose(1, 0)
             TV = T @ V
             TV[TV < eps] = eps
-            division, TV_inverse = P / (TV**2), 1 / TV
+            harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * Z))
+            division, TV_inverse = harmonic / (TV**2), 1 / TV
             TTV = T_transpose @ TV_inverse
             TTV[TTV < eps] = eps
             V = V * np.sqrt(T_transpose @ division / TTV)
 
             self.base, self.activation = T, V
-
     
     def update_space_model(self):
         n_sources = self.n_sources
