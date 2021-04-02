@@ -766,7 +766,7 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
 
     # ILRMA
     n_channels = len(titles)
-    iteration = 200
+    iteration = 50
 
     if method == 'Gauss':
         ilrma = GaussILRMA(n_bases=n_bases, domain=domain, partitioning=partitioning)
@@ -814,7 +814,7 @@ def _test_consistent_ilrma(n_bases=10, partitioning=False):
 
     # ILRMA
     n_channels = len(titles)
-    iteration = 200
+    iteration = 50
     
     ilrma = ConsistentGaussILRMA(n_bases=n_bases, partitioning=partitioning, fft_size=fft_size, hop_size=hop_size)
     estimation = ilrma(mixture, iteration=iteration)
