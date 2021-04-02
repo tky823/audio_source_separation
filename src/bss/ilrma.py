@@ -842,10 +842,12 @@ def _test_conv():
     mic_indices = [2, 5]
     degrees = [60, 300]
     titles = ['man-16000', 'woman-16000']
-    
-    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
 
-    write_wav("data/multi-channel/mixture-{}.wav".format(sr), mixed_signal.T, sr=sr)
+    wav_path = "data/multi-channel/mixture-{}.wav".format(sr)
+
+    if not os.path.exists(wav_path):
+        mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
+        write_wav(wav_path, mixed_signal.T, sr=sr)
 
 if __name__ == '__main__':
     import os
@@ -870,9 +872,9 @@ if __name__ == '__main__':
     Download database from "https://www.iks.rwth-aachen.de/en/research/tools-downloads/databases/multi-channel-impulse-response-database/"
     """
 
-    # _test_conv()
-    # _test(method='Gauss', n_bases=2, partitioning=False)
-    # _test(method='Gauss', n_bases=5, partitioning=True)
+    _test_conv()
+    _test(method='Gauss', n_bases=2, partitioning=False)
+    _test(method='Gauss', n_bases=5, partitioning=True)
     #_test(method='t', n_bases=2, partitioning=False)
     #_test(method='t', n_bases=5, partitioning=True)
     _test_consistent_ilrma(n_bases=5, partitioning=False)
