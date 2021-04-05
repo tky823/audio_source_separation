@@ -36,6 +36,7 @@ class IDLMAbase:
         self.estimation = self.separate(X, demix_filter=W)
 
         self.dnn = dnn
+        self.dnn_output = np.ones(n_sources, n_bins, n_frames)
 
     def __call__(self, input, iteration=100, **kwargs):
         """
