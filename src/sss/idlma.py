@@ -8,7 +8,7 @@ EPS=1e-12
 THRESHOLD=1e+12
 
 class IDLMAbase:
-    def __init__(self, normalize=True, dnn_flooring=1e-5, callback=None, eps=EPS):
+    def __init__(self, normalize=True, callback=None, dnn_flooring=1e-5, eps=EPS):
         self.callback = callback
         self.eps = eps
         self.input = None
@@ -90,13 +90,13 @@ class GaussIDLMA(IDLMAbase):
     """
 
     """
-    def __init__(self, domain=2, normalize='power', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, domain=2, normalize='power', reference_id=0, callback=None, dnn_flooring=1e-5, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(normalize=normalize, callback=callback, eps=eps)
+        super().__init__(normalize=normalize, callback=callback, dnn_flooring=dnn_flooring, eps=eps)
 
         assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
 
