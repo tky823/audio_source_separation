@@ -393,7 +393,7 @@ class tILRMA(ILRMAbase):
     def update_once(self):
         eps = self.eps
 
-        # self.update_source_model()
+        self.update_source_model()
         self.update_space_model()
 
         X, W = self.input, self.demix_filter
@@ -436,10 +436,9 @@ class tILRMA(ILRMAbase):
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
         P = np.abs(Y)**2
-
-        raise NotImplementedError("Implement update_source_model.")
         
         if self.partitioning:
+            raise NotImplementedError("Only support when `partitioning=False` ")
             Z = self.latent # (n_sources, n_bases)
             T, V = self.base, self.activation
 
@@ -480,28 +479,27 @@ class tILRMA(ILRMAbase):
             self.latent = Z
             self.base, self.activation = T, V
         else:
-            T, V = self.base, self.activation
-            Z = np.maximum(P, eps)
+            T, V = self.base, self.activation # (n_sources, n_bins, n_bases), (n_sources, n_bases, n_frames)
 
             # Update bases
-            V_transpose = V.transpose(1, 0)
-            TV = T @ V
+            V_transpose = V.transpose(0, 2, 1) # (n_sources, n_frames, n_bases)
+            TV = T @ V # (n_sources, n_bins, n_frames)
             TV[TV < eps] = eps
-            harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * Z))
-            division, TV_inverse = harmonic / (TV**2), 1 / TV
-            TVV = TV_inverse @ V_transpose
+            harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * P))
+            division, TV_inverse = harmonic / (TV**2), 1 / TV # (n_sources, n_bins, n_frames), (n_sources, n_bins, n_frames)
+            TVV = TV_inverse @ V_transpose # (n_sources, n_bins, n_bases)
             TVV[TVV < eps] = eps
-            T = T * np.sqrt(division @ V_transpose / TVV)
+            T = T * np.sqrt(division @ V_transpose / TVV) # (n_sources, n_bins, n_bases)
 
             # Update activations
-            T_transpose = T.transpose(1, 0)
-            TV = T @ V
+            T_transpose = T.transpose(0, 2, 1) # (n_sources, n_bases, n_bins)
+            TV = T @ V # (n_sources, n_bins, n_frames)
             TV[TV < eps] = eps
-            harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * Z))
-            division, TV_inverse = harmonic / (TV**2), 1 / TV
-            TTV = T_transpose @ TV_inverse
+            harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * P))
+            division, TV_inverse = harmonic / (TV**2), 1 / TV # (n_sources, n_bins, n_frames)
+            TTV = T_transpose @ TV_inverse # (n_sources, n_bases, n_frames)
             TTV[TTV < eps] = eps
-            V = V * np.sqrt(T_transpose @ division / TTV)
+            V = V * np.sqrt(T_transpose @ division / TTV) # (n_sources, n_bases, n_frames)
 
             self.base, self.activation = T, V
     
@@ -771,7 +769,8 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
     if method == 'Gauss':
         ilrma = GaussILRMA(n_bases=n_bases, domain=domain, partitioning=partitioning)
     elif method == 't':
-        ilrma = tILRMA(n_bases=n_bases, partitioning=partitioning)
+        nu = 1000
+        ilrma = tILRMA(n_bases=n_bases, nu=nu, partitioning=partitioning)
     else:
         raise ValueError("Not support {}-ILRMA.".format(method))
     estimation = ilrma(mixture, iteration=iteration)
@@ -875,6 +874,6 @@ if __name__ == '__main__':
     _test_conv()
     _test(method='Gauss', n_bases=2, partitioning=False)
     _test(method='Gauss', n_bases=5, partitioning=True)
-    #_test(method='t', n_bases=2, partitioning=False)
-    #_test(method='t', n_bases=5, partitioning=True)
+    _test(method='t', n_bases=2, partitioning=False)
+    # _test(method='t', n_bases=5, partitioning=True)
     _test_consistent_ilrma(n_bases=5, partitioning=False)
