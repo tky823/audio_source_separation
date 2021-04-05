@@ -180,7 +180,7 @@ class GaussIDLMA(IDLMAbase):
         eps, threshold = self.eps, self.threshold
 
         X, W = self.input, self.demix_filter
-        R = self.dnn_output**(2/domain)
+        R = self.dnn_output[...,np.newaxis, np.newaxis]**(2/domain)
         
         X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
         X = X[...,np.newaxis]
