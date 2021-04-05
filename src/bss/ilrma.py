@@ -322,18 +322,17 @@ class GaussILRMA(ILRMAbase):
 
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
-
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
 
         if self.partitioning:
-            assert domain == 2, "Not support domain = {}".format(domain)
-
             Z = self.latent
             T, V = self.base, self.activation
-            R = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
+            ZTV = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
+            R = ZTV**(2 / domain)
         else:
             T, V = self.base, self.activation
-            R = (T @ V)**(2 / domain) # (n_sources, n_bins, n_frames)
+            TV = T @ V # (n_sources, n_bins, n_frames)
+            R = TV**(2 / domain)
         
         R[R < eps] = eps
         loss = np.sum(P / R + np.log(R)) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W))))
@@ -345,7 +344,7 @@ class tILRMA(ILRMAbase):
     Reference: "Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation"
     See: https://ieeexplore.ieee.org/document/8168129
     """
-    def __init__(self, n_bases=10, nu=1.0, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, nu=1, domain=2, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
         """
         Args:
             nu: degree of freedom. nu = 1: Cauchy distribution, nu -> infty: Gaussian distribution.
@@ -355,9 +354,8 @@ class tILRMA(ILRMAbase):
         super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
 
         self.nu = nu
+        self.domain = domain
         self.reference_id = reference_id
-
-        # TODO: domain
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -395,7 +393,7 @@ class tILRMA(ILRMAbase):
     def update_once(self):
         eps = self.eps
 
-        # self.update_source_model()
+        self.update_source_model()
         self.update_space_model()
 
         X, W = self.input, self.demix_filter
@@ -429,15 +427,18 @@ class tILRMA(ILRMAbase):
             self.estimation = Y
 
     def update_source_model(self):
+        nu = self.nu
+        domain = self.domain
         eps = self.eps
+
+        assert domain == 2, "Only domain = 2 is supported."
 
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
         P = np.abs(Y)**2
-
-        raise NotImplementedError("Implement update_source_model.")
         
         if self.partitioning:
+            raise NotImplementedError("Only support when `partitioning=False` ")
             Z = self.latent # (n_sources, n_bases)
             T, V = self.base, self.activation
 
@@ -478,28 +479,29 @@ class tILRMA(ILRMAbase):
             self.latent = Z
             self.base, self.activation = T, V
         else:
-            T, V = self.base, self.activation
+            T, V = self.base, self.activation # (n_sources, n_bins, n_bases), (n_sources, n_bases, n_frames)
 
             # Update bases
-            V_transpose = V.transpose(0,2,1)
-            TV = T @ V
+            V_transpose = V.transpose(0, 2, 1) # (n_sources, n_frames, n_bases)
+            TV = T @ V # (n_sources, n_bins, n_frames)
             TV[TV < eps] = eps
-            division, TV_inverse = P / (TV**2), 1 / TV
-            TVV = TV_inverse @ V_transpose
+            harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * P))
+            division, TV_inverse = harmonic / (TV**2), 1 / TV # (n_sources, n_bins, n_frames), (n_sources, n_bins, n_frames)
+            TVV = TV_inverse @ V_transpose # (n_sources, n_bins, n_bases)
             TVV[TVV < eps] = eps
-            T = T * np.sqrt(division @ V_transpose / TVV)
-            
+            T = T * np.sqrt(division @ V_transpose / TVV) # (n_sources, n_bins, n_bases)
+
             # Update activations
-            T_transpose = T.transpose(0,2,1)
-            TV = T @ V
+            T_transpose = T.transpose(0, 2, 1) # (n_sources, n_bases, n_bins)
+            TV = T @ V # (n_sources, n_bins, n_frames)
             TV[TV < eps] = eps
-            division, TV_inverse = P / (TV**2), 1 / TV
-            TTV = T_transpose @ TV_inverse
+            harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * P))
+            division, TV_inverse = harmonic / (TV**2), 1 / TV # (n_sources, n_bins, n_frames)
+            TTV = T_transpose @ TV_inverse # (n_sources, n_bases, n_frames)
             TTV[TTV < eps] = eps
-            V = V * np.sqrt(T_transpose @ division / TTV)
+            V = V * np.sqrt(T_transpose @ division / TTV) # (n_sources, n_bases, n_frames)
 
             self.base, self.activation = T, V
-
     
     def update_space_model(self):
         n_sources = self.n_sources
@@ -762,12 +764,13 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
 
     # ILRMA
     n_channels = len(titles)
-    iteration = 200
+    iteration = 50
 
     if method == 'Gauss':
         ilrma = GaussILRMA(n_bases=n_bases, domain=domain, partitioning=partitioning)
     elif method == 't':
-        ilrma = tILRMA(n_bases=n_bases, partitioning=partitioning)
+        nu = 1000
+        ilrma = tILRMA(n_bases=n_bases, nu=nu, partitioning=partitioning)
     else:
         raise ValueError("Not support {}-ILRMA.".format(method))
     estimation = ilrma(mixture, iteration=iteration)
@@ -810,7 +813,7 @@ def _test_consistent_ilrma(n_bases=10, partitioning=False):
 
     # ILRMA
     n_channels = len(titles)
-    iteration = 200
+    iteration = 50
     
     ilrma = ConsistentGaussILRMA(n_bases=n_bases, partitioning=partitioning, fft_size=fft_size, hop_size=hop_size)
     estimation = ilrma(mixture, iteration=iteration)
@@ -838,10 +841,12 @@ def _test_conv():
     mic_indices = [2, 5]
     degrees = [60, 300]
     titles = ['man-16000', 'woman-16000']
-    
-    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
 
-    write_wav("data/multi-channel/mixture-{}.wav".format(sr), mixed_signal.T, sr=sr)
+    wav_path = "data/multi-channel/mixture-{}.wav".format(sr)
+
+    if not os.path.exists(wav_path):
+        mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
+        write_wav(wav_path, mixed_signal.T, sr=sr)
 
 if __name__ == '__main__':
     import os
@@ -866,9 +871,9 @@ if __name__ == '__main__':
     Download database from "https://www.iks.rwth-aachen.de/en/research/tools-downloads/databases/multi-channel-impulse-response-database/"
     """
 
-    # _test_conv()
-    # _test(method='Gauss', n_bases=2, partitioning=False)
-    # _test(method='Gauss', n_bases=5, partitioning=True)
-    #_test(method='t', n_bases=2, partitioning=False)
-    #_test(method='t', n_bases=5, partitioning=True)
+    _test_conv()
+    _test(method='Gauss', n_bases=2, partitioning=False)
+    _test(method='Gauss', n_bases=5, partitioning=True)
+    _test(method='t', n_bases=2, partitioning=False)
+    # _test(method='t', n_bases=5, partitioning=True)
     _test_consistent_ilrma(n_bases=5, partitioning=False)
