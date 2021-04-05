@@ -34,5 +34,4 @@ def projection_back(Y, reference):
     return scale
 
 if __name__ == '__main__':
-    a = np.array([[1,2], [3,4]])
-    print(a.ndim)
+    pass
