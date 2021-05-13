@@ -414,7 +414,7 @@ def _test_ilrma(partitioning=False):
     titles = ['sample-song/sample2_source1', 'sample-song/sample2_source2']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-    write_wav("data/MNMF/GaussILRMA/partitioning{}/mixture.wav".format(int(partitioning)), signal=mixed_signal[0], sr=sr)
+    write_wav("data/MNMF/GaussILRMA/partitioning{}/mixture.wav".format(int(partitioning)), signal=mixed_signal.T, sr=sr)
 
     n_sources, T = mixed_signal.shape
     
