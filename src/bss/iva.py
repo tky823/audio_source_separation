@@ -275,6 +275,7 @@ class AuxLaplaceIVA(AuxIVAbase):
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
         R = np.sqrt(P.sum(axis=1))[:,np.newaxis,:,np.newaxis,np.newaxis] # (n_sources, 1, n_frames, 1, 1)
+        R[R < eps] = eps
         U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
         E = np.eye(n_sources, n_channels)
