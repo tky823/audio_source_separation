@@ -27,8 +27,11 @@ class IVAbase:
         self.n_sources, self.n_channels = n_sources, n_channels
         self.n_bins, self.n_frames = n_bins, n_frames
 
-        W = np.eye(n_channels, dtype=np.complex128)
-        self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
+        if not hasattr(self, 'demix_filter'):
+            W = np.eye(n_channels, dtype=np.complex128)
+            self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
+        else:
+            W = self.demix_filter
         self.estimation = self.separate(X, demix_filter=W)
         
     def __call__(self, input, iteration=100, **kwargs):
@@ -314,6 +317,8 @@ class AuxLaplaceIVA(AuxIVAbase):
 class AuxGaussIVA(AuxIVAbase):
     def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
         super().__init__(reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
+
+        raise NotImplementedError("in progress")
     
     def update_once(self):
         raise NotImplementedError("in progress...")
