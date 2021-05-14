@@ -341,7 +341,35 @@ class SparseAuxIVA(AuxIVAbase):
         raise NotImplementedError("in progress...")
 
 class ProxIVAbase(IVAbase):
-    def __init__(self, callback, eps):
+    def __init__(self, step_logdet_proximity=1e+0, step_penalty_proximity=1e+0, step=1e+0, callback=None, eps=EPS):
+        super().__init__(callback=callback, eps=eps)
+
+        self.step_logdetproximity, self.step_penalty_proximity = step_logdet_proximity, step_penalty_proximity
+        self.step = step
+    
+    def update_once(self):
+        mu1, mu2 = self.step_logdetproximity, self.step_penalty_proximity
+        alpha = self.step
+
+        X, W = self.input, self.demix_filter
+        Y = self.estimation
+
+        W_tilde = self.apply_logdet_proximity(W - mu1 * mu2 * X.transpose().conj() @ Y, mu1) # update demix_filter
+        Z = Y + X @ (2 * W_tilde - W)
+        Y_tilde = Z - self.apply_penalty_proximity(Z, 1 / mu2) # update demix_filter
+        Y = alpha * Y_tilde + (1 - alpha) * Y
+        W = alpha * W_tilde + (1 - alpha) * W
+
+        self.demix_filter, self.estimation = W, Y
+    
+    def apply_logdet_proximity(self, demix_filter, step):
+        raise NotImplementedError("Implement `apply_logdet_proximity` method")
+    
+    def apply_penalty_proximity(self, estimation, step):
+        raise NotImplementedError("Implement `apply_penalty_proximity` method")
+
+class ProxLaplaceIVA(ProxIVAbase):
+    def __init__(self, callback=None, eps=EPS):
         super().__init__(callback=callback, eps=eps)
 
         raise NotImplementedError("coming soon")
@@ -351,7 +379,7 @@ class SparseProxIVA(ProxIVAbase):
     Reference: "Time-frequency-masking-based Determined BSS with Application to Sparse IVA"
     See https://ieeexplore.ieee.org/document/8682217
     """
-    def __init__(self, callback, eps):
+    def __init__(self, callback=None, eps=EPS):
         super().__init__(callback=callback, eps=eps)
 
         raise NotImplementedError("coming soon")
