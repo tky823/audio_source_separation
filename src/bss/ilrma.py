@@ -36,8 +36,11 @@ class ILRMAbase:
         self.n_sources, self.n_channels = n_sources, n_channels
         self.n_bins, self.n_frames = n_bins, n_frames
 
-        W = np.eye(n_sources, n_channels, dtype=np.complex128)
-        self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
+        if not hasattr(self, 'demix_filter'):
+            W = np.eye(n_sources, n_channels, dtype=np.complex128)
+            self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
+        else:
+            W = self.demix_filter
         self.estimation = self.separate(X, demix_filter=W)
 
         if self.partitioning:
