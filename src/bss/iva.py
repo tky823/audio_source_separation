@@ -83,6 +83,10 @@ class IVAbase:
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
 class GradIVAbase(IVAbase):
+    """
+    Reference: "Independent Vector Analysis: Definition and Algorithms"
+    See https://ieeexplore.ieee.org/document/4176796
+    """
     def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
         super().__init__(callback=callback, eps=eps)
 
@@ -323,6 +327,35 @@ class AuxGaussIVA(AuxIVAbase):
     def update_once(self):
         raise NotImplementedError("in progress...")
 
+class SparseAuxIVA(AuxIVAbase):
+    """
+    Reference: "A computationally cheaper method for blind speech separation based on AuxIVA and incomplete demixing transform"
+    See https://ieeexplore.ieee.org/document/7602921
+    """
+    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+        super().__init__(reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
+
+        raise NotImplementedError("in progress")
+    
+    def update_once(self):
+        raise NotImplementedError("in progress...")
+
+class ProxIVAbase(IVAbase):
+    def __init__(self, callback, eps):
+        super().__init__(callback=callback, eps=eps)
+
+        raise NotImplementedError("coming soon")
+
+class SparseProxIVA(ProxIVAbase):
+    """
+    Reference: "Time-frequency-masking-based Determined BSS with Application to Sparse IVA"
+    See https://ieeexplore.ieee.org/document/8682217
+    """
+    def __init__(self, callback, eps):
+        super().__init__(callback=callback, eps=eps)
+
+        raise NotImplementedError("coming soon")
+
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
@@ -394,6 +427,8 @@ def _test(method='AuxLaplaceIVA'):
     elif method == 'AuxLaplaceIVA':
         iva = AuxLaplaceIVA()
         iteration = 50
+    elif method == 'ProxIVA':
+        raise NotImplementedError("Not support ProxIVA")
     else:
         raise ValueError("Not support method {}".format(method))
 
