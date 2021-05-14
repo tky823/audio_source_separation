@@ -28,7 +28,7 @@ class IVAbase:
         self.n_bins, self.n_frames = n_bins, n_frames
 
         if not hasattr(self, 'demix_filter'):
-            W = np.eye(n_channels, dtype=np.complex128)
+            W = np.eye(n_sources, n_channels, dtype=np.complex128)
             self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
         else:
             W = self.demix_filter
