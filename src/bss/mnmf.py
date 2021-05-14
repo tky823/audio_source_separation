@@ -7,7 +7,7 @@ EPS=1e-12
 __metrics__ = ['EUC', 'KL', 'IS']
 __authors__ = ['sawada', 'ozerov']
 
-class MNMFbase:
+class MultichannelNMFbase:
     def __init__(self, n_bases=10, n_sources=None, callback=None, eps=EPS):
         """
         Args:
@@ -91,22 +91,28 @@ class MNMFbase:
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class GaussMNMF(MNMFbase):
+class MultichannelISNMF(MultichannelNMFbase):
     """
     References:
         Sawada's MNMF: "Multichannel Extensions of Non-Negative Matrix Factorization With Complex-Valued Data"
         Ozerov's MNMF: "Multichannel Nonnegative Matrix Factorization in Convolutive Mixtures for Audio Source Separation"
     See https://ieeexplore.ieee.org/document/6410389 and https://ieeexplore.ieee.org/document/5229304
     """
-    def __init__(self, n_bases=10, n_sources=None, partitioning=False, normalize=True, reference_id=0, callback=None, author='Sawada', eps=EPS):
+    def __init__(self, n_bases=10, n_clusters=2, n_sources=None, normalize=True, callback=None, author='Sawada', eps=EPS):
         """
         Args:
+            n_bases
+            n_clusters
+            n_sources
+            normalize
+            callback <callable>: Callback function. Default: None
+            author <str>: 'Sawada' or 'Ozerov'
+            eps <float>: Machine epsilon
         """
         super().__init__(n_bases=n_bases, n_sources=n_sources, callback=callback, eps=eps)
 
-        self.partitioning = partitioning
+        self.n_clusters = n_clusters
         self.normalize = normalize
-        self.reference_id = reference_id
 
         assert author.lower() in __authors__, "Choose from {}".format(__authors__)
 
@@ -135,7 +141,6 @@ class GaussMNMF(MNMFbase):
             if self.callback is not None:
                 self.callback(self)
         
-        reference_id = self.reference_id
         X = self.input
         output = self.separate(X)
         self.estimation = output
@@ -148,7 +153,7 @@ class GaussMNMF(MNMFbase):
         for key in kwargs.keys():
             setattr(self, key, kwargs[key])
 
-        n_bases = self.n_bases
+        n_bases, n_clusters = self.n_bases, self.n_clusters
         n_sources = self.n_sources
 
         X = self.input
@@ -156,16 +161,20 @@ class GaussMNMF(MNMFbase):
 
         if n_sources is None:
             n_sources = n_channels
+        
         self.n_sources, self.n_channels = n_channels, n_sources
         self.n_bins, self.n_frames = n_bins, n_frames
 
-        H = np.eye(n_channels, dtype=np.complex128)
-        self.spatial = np.tile(H, reps=(n_bins, n_bases, 1, 1))
+        Z, H = np.ones((n_clusters, n_bases), dtype=np.float), np.eye(n_channels, dtype=np.complex128)
         XX = X[:, np.newaxis, :, :] * X[np.newaxis, :, :, :].conj()
+
+        self.spatial = np.tile(H, reps=(n_bins, n_clusters, 1, 1))
+        self.latent = Z
         self.covariance_input = XX.transpose(2, 3, 0, 1)
         
         self.base = np.random.rand(n_bins, n_bases)
         self.activation = np.random.rand(n_bases, n_frames)
+
         self.estimation = self.separate(X)
     
     def _parallel_sort(self, x, indices):
@@ -269,7 +278,7 @@ class GaussMNMF(MNMFbase):
         loss = loss.sum()
         return loss
 
-class tMNMF(MNMFbase):
+class MultichanneltNMF(MultichannelNMFbase):
     """
     Reference: "Student's t multichannel nonnegative matrix factorization for blind source separation"
     See https://ieeexplore.ieee.org/document/7602889
@@ -285,7 +294,7 @@ class tMNMF(MNMFbase):
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class FastGaussMNMF(MNMFbase):
+class FastMultichannelISNMF(MultichannelNMFbase):
     """
     Reference: "Fast Multichannel Source Separation Based on Jointly Diagonalizable Spatial Covariance Matrices"
     """
@@ -364,22 +373,23 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
     mic_intervals = [8, 8, 8, 8, 8, 8, 8]
     mic_indices = [2, 5]
     degrees = [60, 300]
-    titles = ['man-16000', 'woman-16000']
+    titles = ['sample-song/sample2_source1', 'sample-song/sample2_source2']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
+    write_wav("data/MNMF/GaussMNMF/partitioning{}/mixture.wav".format(int(partitioning)), signal=mixed_signal.T, sr=sr)
 
     n_sources, T = mixed_signal.shape
     
     # STFT
-    fft_size, hop_size = 2048, 1024
+    fft_size, hop_size = 4096, 2048
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # MNMF
     n_channels = len(titles)
-    iteration = 50
+    iteration = 10
 
     if method == 'Gauss':
-        mnmf = GaussMNMF(n_bases=n_bases, partitioning=partitioning)
+        mnmf = MultichannelISNMF(n_bases=n_bases)
     else:
         raise ValueError("Not support {}-MNMF.".format(method))
     estimation = mnmf(mixture, iteration=iteration)
@@ -505,6 +515,6 @@ if __name__ == '__main__':
     """
 
     _test_conv()
-    # _test(method='Gauss', n_bases=2, partitioning=False)
-    _test_ilrma(partitioning=False)
-    _test_ilrma(partitioning=True)
+    _test(method='Gauss', n_bases=2, partitioning=False)
+    # _test_ilrma(partitioning=False)
+    # _test_ilrma(partitioning=True)
