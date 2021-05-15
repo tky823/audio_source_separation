@@ -638,6 +638,13 @@ class ComplexEUCNMF(ComplexNMFbase):
         TVsum[TVsum < eps] = eps
         self.Beta = TV / TVsum
 
+"""
+    TODO
+    - "Itakura-Saito nonnegative matrix factorization with group sparsity", https://ieeexplore.ieee.org/document/5946318
+    - NMF with beta divergence
+    - NMF with Bregman divergence
+"""
+
 def _test(metric='EUC', algorithm='mm'):
     np.random.seed(111)
 
