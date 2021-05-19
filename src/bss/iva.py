@@ -342,11 +342,12 @@ class SparseAuxIVA(AuxIVAbase):
         raise NotImplementedError("in progress...")
 
 class ProxIVAbase(IVAbase):
-    def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, callback=None, eps=EPS):
+    def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
         super().__init__(callback=callback, eps=eps)
 
         self.step_prox_logdet, self.step_prox_penalty = step_prox_logdet, step_prox_penalty
         self.step = step
+        self.reference_id = reference_id
     
     def _reset(self, **kwargs):
         super()._reset(**kwargs)
@@ -368,6 +369,29 @@ class ProxIVAbase(IVAbase):
         w = W.transpose(1, 2, 0).reshape(n_sources * n_channels * n_bins, 1) # (n_bins, n_sources, n_channels) -> (n_sources * n_channels * n_bins)
         self.demix_filter_vectorized = sci_sparse.lil_matrix(w)
         self.y = sci_sparse.lil_matrix((FNT, 1), dtype=np.complex128)
+    
+    def __call__(self, input, iteration, **kwargs):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+            iteration <int>
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        Y = super().__call__(input, iteration=iteration, **kwargs)
+
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        """
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        self.estimation = output
+        """
+        output = Y
+
+        return output
 
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -391,15 +415,16 @@ class ProxIVAbase(IVAbase):
         
         Y = self.separate(X, demix_filter=W)
 
+        self.y = y
         self.demix_filter_vectorized = w
         self.demix_filter = W
         self.estimation = Y
     
-    def prox_logdet(self, demix_filter, step=1, is_sparse=True):
+    def prox_logdet(self, demix_filter, mu=1, is_sparse=True):
         """
         Args:
             demix_filter (n_sources * n_channels * n_bins) when `is_sparse` is True, or (n_bins, n_sources, n_channels)
-            step <float>: step size
+            mu <float>: 
         Returns:
             demix_filter (n_sources * n_channels * n_bins) when `is_sparse` is True, or (n_bins, n_sources, n_channels)
         """
@@ -412,12 +437,9 @@ class ProxIVAbase(IVAbase):
         else:
             W = demix_filter
         U, Sigma, V = np.linalg.svd(W)
-        f = 128
-        Sigma = (Sigma + np.sqrt(Sigma**2 + 4 * step)) / 2
-        print(Sigma[f])
+        Sigma = (Sigma + np.sqrt(Sigma**2 + 4 * mu)) / 2
         eyes = np.eye(n_sources, n_channels)
         Sigma = eyes * Sigma[:, :, np.newaxis]
-        print(Sigma[f])
         W_tilde = U @ Sigma @ V
 
         if is_sparse:
@@ -428,7 +450,7 @@ class ProxIVAbase(IVAbase):
         
         return demix_filter
     
-    def prox_penalty(self, demix_filter, step=1):
+    def prox_penalty(self, demix_filter, mu=1):
         raise NotImplementedError("Implement `prox_penalty` method")
     
     def compute_negative_loglikelihood(self):
@@ -461,18 +483,17 @@ class ProxIVAbase(IVAbase):
         return loss
 
 class ProxIVA(ProxIVAbase):
-    def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, callback=None, eps=EPS):
-        super().__init__(step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callback=callback, eps=eps)
+    def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
+        super().__init__(step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, reference_id=reference_id, callback=callback, eps=eps)
     
-    def prox_penalty(self, z, step=1, is_sparse=True):
+    def prox_penalty(self, z, mu=1, is_sparse=True):
         """
         Args:
             z (n_bins * n_sources * n_frames, 1) <scipy.sparse.lil_matrix>
-            step <float>: step size parameter
+            mu <float>: 
         Returns:
             z_tilde (n_bins * n_sources * n_frames, 1) <scipy.sparse.lil_matrix>
         """
-        mu2 = step
         n_sources, n_channels = self.n_sources, self.n_channels
         n_bins, n_frames = self.n_bins, self.n_frames
 
@@ -481,8 +502,8 @@ class ProxIVA(ProxIVAbase):
         z = z.toarray().reshape(n_bins, n_sources, n_frames) # (n_bins, n_sources, n_frames)
         zsum = np.sum(np.abs(z)**2, axis=0)
         denominator = np.sqrt(zsum)
-        denominator = np.where(denominator <= 0, mu2, denominator)
-        z_tilde = np.maximum(0, 1 - mu2 / denominator) * z
+        denominator = np.where(denominator <= 0, mu, denominator)
+        z_tilde = np.maximum(0, 1 - mu / denominator) * z
         z_tilde = z_tilde.reshape(n_bins * n_sources * n_frames, 1)
         z_tilde = sci_sparse.lil_matrix(z_tilde)
 
@@ -606,9 +627,9 @@ if __name__ == '__main__':
 
     os.makedirs("data/multi-channel", exist_ok=True)
     os.makedirs("data/IVA/GradLaplaceIVA", exist_ok=True)
-    os.makedirs("data/iVA/NaturalGradLaplaceIVA", exist_ok=True)
-    os.makedirs("data/iVA/AuxLaplaceIVA", exist_ok=True)
-
+    os.makedirs("data/IVA/NaturalGradLaplaceIVA", exist_ok=True)
+    os.makedirs("data/IVA/AuxLaplaceIVA", exist_ok=True)
+    os.makedirs("data/IVA/ProxIVA", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
