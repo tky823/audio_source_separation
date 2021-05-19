@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.sparse import bsr_matrix
+import scipy.sparse as sci_sparse
 
 from algorithm.projection_back import projection_back
 
@@ -361,8 +361,12 @@ class ProxIVAbase(IVAbase):
         X = np.tile(X[:, np.newaxis, :, :], reps=(1, n_sources, 1, 1)).reshape(n_bins * n_sources, n_frames, n_channels)
         indptr = np.arange(n_bins * n_sources + 1)
         indices = np.arange(n_bins * n_sources)
-        X = bsr_matrix((X, indices, indptr), shape=(FNT, FNM))
-        norm = np.linalg.norm(X, ord=2)
+        X = sci_sparse.bsr_matrix((X, indices, indptr), shape=(FNT, FNM))
+        U, S, V = sci_sparse.linalg.svds(X)
+        print(S)
+        U, S, V = np.linalg.svd(X.toarray())
+        print(S)
+        exit()
 
         self.input_vectorized = X / norm
         self.demix_filter_vectorized = W.transpose(1, 2, 0).flatten() # (n_bins, n_sources, n_channels) -> (n_sources * n_channels * n_bins)
