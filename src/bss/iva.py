@@ -365,9 +365,9 @@ class ProxIVAbase(IVAbase):
         X = sci_sparse.bsr_matrix((X, indices, indptr), shape=(FNT, FNM))
         _, [norm], _ = sci_sparse.linalg.svds(X, k=1, which='LM') # Largest
 
-        self.input_vectorized = X / norm
-        w = W.transpose(1, 2, 0).reshape(n_sources * n_channels * n_bins, 1) # (n_bins, n_sources, n_channels) -> (n_sources * n_channels * n_bins)
-        self.demix_filter_vectorized = sci_sparse.lil_matrix(w)
+        self.input_sparse = X / norm
+        w = W.reshape(n_bins * n_sources * n_channels, 1) # (n_bins, n_sources, n_channels) -> (n_bins * n_sources * n_channels, 1)
+        self.demix_filter_sparse = sci_sparse.lil_matrix(w)
         self.y = sci_sparse.lil_matrix((FNT, 1), dtype=np.complex128)
     
     def __call__(self, input, iteration, **kwargs):
@@ -384,12 +384,9 @@ class ProxIVAbase(IVAbase):
         X, W = input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
 
-        """
         scale = projection_back(Y, reference=X[reference_id])
         output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
         self.estimation = output
-        """
-        output = Y
 
         return output
 
@@ -400,23 +397,22 @@ class ProxIVAbase(IVAbase):
         mu1, mu2 = self.step_prox_logdet, self.step_prox_penalty
         alpha = self.step
 
-        X, w = self.input_vectorized, self.demix_filter_vectorized
+        X, w = self.input_sparse, self.demix_filter_sparse
         y = self.y
 
-        Xy = X.T.conj() * y
-        w_tilde = self.prox_logdet(w - mu1 * mu2 * Xy, mu1) # update demix_filter
+        w_tilde = self.prox_logdet(w - mu1 * mu2 * X.T.conj() @ y, mu1) # update demix_filter
         z = y + X @ (2 * w_tilde - w)
         y_tilde = z - self.prox_penalty(z, 1 / mu2) # update demix_filter
         y = alpha * y_tilde + (1 - alpha) * y
         w = alpha * w_tilde + (1 - alpha) * w
         
         X = self.input
-        W = w.toarray().reshape(n_sources, n_channels, n_bins).transpose(2, 0, 1) # -> (n_bins, n_sources, n_channels)
+        W = w.toarray().reshape(n_bins, n_sources, n_channels) # -> (n_bins, n_sources, n_channels)
         
         Y = self.separate(X, demix_filter=W)
 
         self.y = y
-        self.demix_filter_vectorized = w
+        self.demix_filter_sparse = w
         self.demix_filter = W
         self.estimation = Y
     
@@ -433,7 +429,7 @@ class ProxIVAbase(IVAbase):
 
         if is_sparse:
             w = demix_filter.toarray()
-            W = w.reshape(n_sources, n_channels, n_bins).transpose(2, 0, 1) # -> (n_bins, n_sources, n_channels)
+            W = w.reshape(n_bins, n_sources, n_channels) # -> (n_bins, n_sources, n_channels)
         else:
             W = demix_filter
         U, Sigma, V = np.linalg.svd(W)
@@ -443,7 +439,7 @@ class ProxIVAbase(IVAbase):
         W_tilde = U @ Sigma @ V
 
         if is_sparse:
-            w_tilde = W_tilde.transpose(1, 2, 0).reshape(n_sources * n_channels * n_bins, 1)
+            w_tilde = W_tilde.reshape(n_bins * n_sources * n_channels, 1)
             demix_filter = sci_sparse.lil_matrix(w_tilde)
         else:
             demix_filter = W_tilde
@@ -571,7 +567,9 @@ def _test(method='AuxLaplaceIVA'):
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
 
     n_channels, T = mixed_signal.shape
-    mixed_signal = mixed_signal[:, :8192]
+
+    # Whitening
+    # mixed_signal = whitening(mixed_signal)
     
     # STFT
     fft_size, hop_size = 2048, 1024
@@ -593,7 +591,7 @@ def _test(method='AuxLaplaceIVA'):
         iteration = 50
     elif method == 'ProxIVA':
         iva = ProxIVA()
-        iteration = 100
+        iteration = 500
     else:
         raise ValueError("Not support method {}".format(method))
 
@@ -621,7 +619,8 @@ if __name__ == '__main__':
     from scipy.io import loadmat
 
     from utils.utils_audio import read_wav, write_wav
-    from algorithm.stft import stft, istft
+    from transform.stft import stft, istft
+    from transform.whitening import whitening
 
     plt.rcParams['figure.dpi'] = 200
 
