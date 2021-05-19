@@ -362,15 +362,12 @@ class ProxIVAbase(IVAbase):
         indptr = np.arange(n_bins * n_sources + 1)
         indices = np.arange(n_bins * n_sources)
         X = sci_sparse.bsr_matrix((X, indices, indptr), shape=(FNT, FNM))
-        U, S, V = sci_sparse.linalg.svds(X)
-        print(S)
-        U, S, V = np.linalg.svd(X.toarray())
-        print(S)
-        exit()
+        _, [norm], _ = sci_sparse.linalg.svds(X, k=1, which='LM') # Largest
 
         self.input_vectorized = X / norm
-        self.demix_filter_vectorized = W.transpose(1, 2, 0).flatten() # (n_bins, n_sources, n_channels) -> (n_sources * n_channels * n_bins)
-        self.y = np.zeros(FNT, dtype=np.complex128)
+        w = W.transpose(1, 2, 0).reshape(n_sources * n_channels * n_bins, 1) # (n_bins, n_sources, n_channels) -> (n_sources * n_channels * n_bins)
+        self.demix_filter_vectorized = sci_sparse.lil_matrix(w)
+        self.y = sci_sparse.lil_matrix((FNT, 1), dtype=np.complex128)
 
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -382,14 +379,15 @@ class ProxIVAbase(IVAbase):
         X, w = self.input_vectorized, self.demix_filter_vectorized
         y = self.y
 
-        w_tilde = self.prox_logdet(w - mu1 * mu2 * X.transpose(1, 0).conj() @ y, mu1) # update demix_filter
+        Xy = X.T.conj() * y
+        w_tilde = self.prox_logdet(w - mu1 * mu2 * Xy, mu1) # update demix_filter
         z = y + X @ (2 * w_tilde - w)
         y_tilde = z - self.prox_penalty(z, 1 / mu2) # update demix_filter
         y = alpha * y_tilde + (1 - alpha) * y
         w = alpha * w_tilde + (1 - alpha) * w
         
         X = self.input
-        W = w.reshape(n_sources, n_channels, n_bins).transpose(2, 0, 1)
+        W = w.toarray().reshape(n_sources, n_channels, n_bins).transpose(2, 0, 1) # -> (n_bins, n_sources, n_channels)
         
         Y = self.separate(X, demix_filter=W)
 
@@ -397,19 +395,20 @@ class ProxIVAbase(IVAbase):
         self.demix_filter = W
         self.estimation = Y
     
-    def prox_logdet(self, demix_filter, step=1, is_vectorized=True):
+    def prox_logdet(self, demix_filter, step=1, is_sparse=True):
         """
         Args:
-            demix_filter (n_sources * n_channels * n_bins) when `is_vectorized` is True, or (n_bins, n_sources, n_channels)
+            demix_filter (n_sources * n_channels * n_bins) when `is_sparse` is True, or (n_bins, n_sources, n_channels)
             step <float>: step size
         Returns:
-            demix_filter (n_sources * n_channels * n_bins) when `is_vectorized` is True, or (n_bins, n_sources, n_channels)
+            demix_filter (n_sources * n_channels * n_bins) when `is_sparse` is True, or (n_bins, n_sources, n_channels)
         """
         n_sources, n_channels = self.n_sources, self.n_channels
         n_bins = self.n_bins
 
-        if is_vectorized:
-            W = demix_filter.reshape(n_sources, n_channels, n_bins).transpose(2, 0, 1) # -> (n_bins, n_sources, n_channels)
+        if is_sparse:
+            w = demix_filter.toarray()
+            W = w.reshape(n_sources, n_channels, n_bins).transpose(2, 0, 1) # -> (n_bins, n_sources, n_channels)
         else:
             W = demix_filter
         U, Sigma, V = np.linalg.svd(W)
@@ -421,10 +420,12 @@ class ProxIVAbase(IVAbase):
         print(Sigma[f])
         W_tilde = U @ Sigma @ V
 
-        if is_vectorized:
-            demix_filter = W_tilde.transpose(1, 2, 0).flatten()
+        if is_sparse:
+            w_tilde = W_tilde.transpose(1, 2, 0).reshape(n_sources * n_channels * n_bins, 1)
+            demix_filter = sci_sparse.lil_matrix(w_tilde)
         else:
             demix_filter = W_tilde
+        
         return demix_filter
     
     def prox_penalty(self, demix_filter, step=1):
@@ -463,24 +464,25 @@ class ProxIVA(ProxIVAbase):
     def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, callback=None, eps=EPS):
         super().__init__(step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callback=callback, eps=eps)
     
-    def prox_penalty(self, z, step=1, is_vectorized=True):
+    def prox_penalty(self, z, step=1, is_sparse=True):
         """
         Args:
-            z (n_bins * n_sources * n_frames) <np.ndarray>
+            z (n_bins * n_sources * n_frames, 1) <scipy.sparse.lil_matrix>
             step <float>: step size parameter
         Returns:
-            z_tilde <float> (n_bins * n_sources * n_frames)
+            z_tilde (n_bins * n_sources * n_frames, 1) <scipy.sparse.lil_matrix>
         """
         mu2 = step
         n_sources, n_channels = self.n_sources, self.n_channels
         n_bins, n_frames = self.n_bins, self.n_frames
 
-        assert is_vectorized, "`is_vectorized` is expected True."
-        z = z.reshape(n_bins, n_sources, n_frames) # (n_bins, n_sources, n_frames) 
+        assert is_sparse, "`is_sparse` is expected True."
 
+        z = z.toarray().reshape(n_bins, n_sources, n_frames) # (n_bins, n_sources, n_frames)
         zsum = np.sum(np.abs(z)**2, axis=0)
         z_tilde = np.maximum(0, 1 - mu2 / np.sqrt(zsum)) * z
-        z_tilde = z_tilde.flatten()
+        z_tilde = z_tilde.reshape(n_bins * n_sources * n_frames, 1)
+        z_tilde = sci_sparse.lil_matrix(z_tilde)
 
         return z_tilde
 
