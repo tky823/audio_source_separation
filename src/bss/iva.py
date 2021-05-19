@@ -455,21 +455,7 @@ class ProxIVAbase(IVAbase):
         return loss
     
     def compute_penalty(self):
-        """
-        Args:
-            estimation (n_sources, n_bins, n_frames) <np.ndarray>
-        Returns:
-            loss <float>
-        """
-        X, W = self.input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
-        C = 2 # TODO
-
-        loss = np.sum(np.abs(Y)**2, axis=1) # (n_sources, n_frames)
-        loss = np.sqrt(loss) # (n_sources, n_frames)
-        loss = C * loss.sum(axis=(0, 1))
-        
-        return loss
+        raise NotImplementedError("Implement `compute_penalty` method")
     
     def compute_negative_logdet(self):
         W = self.demix_filter
@@ -478,7 +464,7 @@ class ProxIVAbase(IVAbase):
 
         return loss
 
-class ProxIVA(ProxIVAbase):
+class ProxLaplaceIVA(ProxIVAbase):
     def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
         super().__init__(step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, reference_id=reference_id, callback=callback, eps=eps)
     
@@ -504,6 +490,23 @@ class ProxIVA(ProxIVAbase):
         z_tilde = sci_sparse.lil_matrix(z_tilde)
 
         return z_tilde
+    
+    def compute_penalty(self):
+        """
+        Args:
+            estimation (n_sources, n_bins, n_frames) <np.ndarray>
+        Returns:
+            loss <float>
+        """
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+        C = 2 # TODO
+
+        loss = np.sum(np.abs(Y)**2, axis=1) # (n_sources, n_frames)
+        loss = np.sqrt(loss) # (n_sources, n_frames)
+        loss = C * loss.sum(axis=(0, 1))
+        
+        return loss
 
 class SparseProxIVA(ProxIVAbase):
     """
@@ -567,31 +570,30 @@ def _test(method='AuxLaplaceIVA'):
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
 
     n_channels, T = mixed_signal.shape
-
-    # Whitening
-    # mixed_signal = whitening(mixed_signal)
     
     # STFT
     fft_size, hop_size = 2048, 1024
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # IVA
-    lr = 0.1
     n_sources = len(titles)
     iteration = 200
 
     if method == 'GradLaplaceIVA':
+        lr = 0.1
         iva = GradLaplaceIVA(lr=lr)
         iteration = 5000
     elif method == 'NaturalGradLaplaceIVA':
+        lr = 0.1
         iva = NaturalGradLaplaceIVA(lr=lr)
         iteration = 200
     elif method == 'AuxLaplaceIVA':
         iva = AuxLaplaceIVA()
         iteration = 50
-    elif method == 'ProxIVA':
-        iva = ProxIVA()
-        iteration = 500
+    elif method == 'ProxLaplaceIVA':
+        step = 1.75
+        iva = ProxLaplaceIVA(step=step)
+        iteration = 100
     else:
         raise ValueError("Not support method {}".format(method))
 
@@ -612,6 +614,20 @@ def _test(method='AuxLaplaceIVA'):
     plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
 
+def _test_conv():
+    sr = 16000
+    reverb = 0.16
+    duration = 0.5
+    samples = int(duration * sr)
+    mic_indices = [2, 5]
+    degrees = [60, 300]
+    titles = ['man-16000', 'woman-16000']
+
+    wav_path = "data/multi-channel/mixture-{}.wav".format(sr)
+
+    if not os.path.exists(wav_path):
+        mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
+        write_wav(wav_path, mixed_signal.T, sr=sr)
 
 if __name__ == '__main__':
     import os
@@ -628,15 +644,15 @@ if __name__ == '__main__':
     os.makedirs("data/IVA/GradLaplaceIVA", exist_ok=True)
     os.makedirs("data/IVA/NaturalGradLaplaceIVA", exist_ok=True)
     os.makedirs("data/IVA/AuxLaplaceIVA", exist_ok=True)
-    os.makedirs("data/IVA/ProxIVA", exist_ok=True)
+    os.makedirs("data/IVA/ProxLaplaceIVA", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
     Download database from "https://www.iks.rwth-aachen.de/en/research/tools-downloads/databases/multi-channel-impulse-response-database/"
     """
 
-    # _test_conv()
-    #_test(method='GradLaplaceIVA')
-    #_test(method='NaturalGradLaplaceIVA')
-    #_test(method='AuxLaplaceIVA')
-    _test(method='ProxIVA')
+    _test_conv()
+    _test(method='GradLaplaceIVA')
+    _test(method='NaturalGradLaplaceIVA')
+    _test(method='AuxLaplaceIVA')
+    _test(method='ProxLaplaceIVA')
