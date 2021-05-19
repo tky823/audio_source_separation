@@ -480,7 +480,9 @@ class ProxIVA(ProxIVAbase):
 
         z = z.toarray().reshape(n_bins, n_sources, n_frames) # (n_bins, n_sources, n_frames)
         zsum = np.sum(np.abs(z)**2, axis=0)
-        z_tilde = np.maximum(0, 1 - mu2 / np.sqrt(zsum)) * z
+        denominator = np.sqrt(zsum)
+        denominator = np.where(denominator <= 0, mu2, denominator)
+        z_tilde = np.maximum(0, 1 - mu2 / denominator) * z
         z_tilde = z_tilde.reshape(n_bins * n_sources * n_frames, 1)
         z_tilde = sci_sparse.lil_matrix(z_tilde)
 
