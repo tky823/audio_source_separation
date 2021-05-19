@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.sparse import bsr_matrix
 
 from algorithm.projection_back import projection_back
 
@@ -355,40 +356,17 @@ class ProxIVAbase(IVAbase):
 
         X, W = self.input, self.demix_filter
         X = X.transpose(1, 2, 0).reshape(n_bins, n_frames, n_channels) # (n_channels, n_bins, n_frames) -> (n_bins, n_frames, n_channels)
-
-        def create_diag_block(X_f):
-            # X_f (n_frames, n_channels)
-            zeros_FM = np.zeros((n_frames, n_channels))
-            blocks = []
-            for n in range(n_sources):
-                sub_blocks = []
-                for n_dash in range(n_sources):
-                    if n_dash == n:
-                        sub_blocks.append(X_f)
-                    else:
-                        sub_blocks.append(zeros_FM)
-                blocks.append(sub_blocks)
-            blocks = np.block(blocks) # (n_sources * n_frames, n_sources * n_channels)
-            
-            return blocks
         
-        zeros_NTNM = np.zeros((n_sources * n_frames, n_sources * n_channels))
-        blocks = []
-        for f in range(n_bins):
-            sub_blocks = []
-            for f_dash in range(n_bins):
-                if f_dash == f:
-                    X_f = create_diag_block(X[f])
-                    sub_blocks.append(X_f)
-                else:
-                    sub_blocks.append(zeros_NTNM)
-            blocks.append(sub_blocks)
-        
-        X = np.block(blocks) # (n_bins * n_sources * n_frames, n_bins * n_sources * n_channels)
+        FNT, FNM = n_bins * n_sources * n_frames, n_bins * n_sources * n_channels
+        X = np.tile(X[:, np.newaxis, :, :], reps=(1, n_sources, 1, 1)).reshape(n_bins * n_sources, n_frames, n_channels)
+        indptr = np.arange(n_bins * n_sources + 1)
+        indices = np.arange(n_bins * n_sources)
+        X = bsr_matrix((X, indices, indptr), shape=(FNT, FNM))
         norm = np.linalg.norm(X, ord=2)
+
         self.input_vectorized = X / norm
         self.demix_filter_vectorized = W.transpose(1, 2, 0).flatten() # (n_bins, n_sources, n_channels) -> (n_sources * n_channels * n_bins)
-        self.y = np.zeros(self.input_vectorized.shape[0], dtype=np.complex128) 
+        self.y = np.zeros(FNT, dtype=np.complex128)
 
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -445,7 +423,7 @@ class ProxIVAbase(IVAbase):
             demix_filter = W_tilde
         return demix_filter
     
-    def prox_penalty(self, estimation, step=1):
+    def prox_penalty(self, demix_filter, step=1):
         raise NotImplementedError("Implement `prox_penalty` method")
     
     def compute_negative_loglikelihood(self):
