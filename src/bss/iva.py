@@ -341,38 +341,166 @@ class SparseAuxIVA(AuxIVAbase):
         raise NotImplementedError("in progress...")
 
 class ProxIVAbase(IVAbase):
-    def __init__(self, step_logdet_proximity=1e+0, step_penalty_proximity=1e+0, step=1e+0, callback=None, eps=EPS):
+    def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, callback=None, eps=EPS):
         super().__init__(callback=callback, eps=eps)
 
-        self.step_logdetproximity, self.step_penalty_proximity = step_logdet_proximity, step_penalty_proximity
+        self.step_prox_logdet, self.step_prox_penalty = step_prox_logdet, step_prox_penalty
         self.step = step
     
-    def update_once(self):
-        mu1, mu2 = self.step_logdetproximity, self.step_penalty_proximity
-        alpha = self.step
+    def _reset(self, **kwargs):
+        super()._reset(**kwargs)
+
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_bins, n_frames = self.n_bins, self.n_frames
 
         X, W = self.input, self.demix_filter
-        Y = self.estimation
+        X = X.transpose(1, 2, 0).reshape(n_bins, n_frames, n_channels) # (n_channels, n_bins, n_frames) -> (n_bins, n_frames, n_channels)
 
-        W_tilde = self.apply_logdet_proximity(W - mu1 * mu2 * X.transpose().conj() @ Y, mu1) # update demix_filter
-        Z = Y + X @ (2 * W_tilde - W)
-        Y_tilde = Z - self.apply_penalty_proximity(Z, 1 / mu2) # update demix_filter
-        Y = alpha * Y_tilde + (1 - alpha) * Y
-        W = alpha * W_tilde + (1 - alpha) * W
+        def create_diag_block(X_f):
+            # X_f (n_frames, n_channels)
+            zeros_FM = np.zeros((n_frames, n_channels))
+            blocks = []
+            for n in range(n_sources):
+                sub_blocks = []
+                for n_dash in range(n_sources):
+                    if n_dash == n:
+                        sub_blocks.append(X_f)
+                    else:
+                        sub_blocks.append(zeros_FM)
+                blocks.append(sub_blocks)
+            blocks = np.block(blocks) # (n_sources * n_frames, n_sources * n_channels)
+            
+            return blocks
+        
+        zeros_NTNM = np.zeros((n_sources * n_frames, n_sources * n_channels))
+        blocks = []
+        for f in range(n_bins):
+            sub_blocks = []
+            for f_dash in range(n_bins):
+                if f_dash == f:
+                    X_f = create_diag_block(X[f])
+                    sub_blocks.append(X_f)
+                else:
+                    sub_blocks.append(zeros_NTNM)
+            blocks.append(sub_blocks)
+        
+        X = np.block(blocks) # (n_bins * n_sources * n_frames, n_bins * n_sources * n_channels)
+        norm = np.linalg.norm(X, ord=2)
+        self.input_vectorized = X / norm
+        self.demix_filter_vectorized = W.transpose(1, 2, 0).flatten() # (n_bins, n_sources, n_channels) -> (n_sources * n_channels * n_bins)
+        self.y = np.zeros(self.input_vectorized.shape[0], dtype=np.complex128) 
 
-        self.demix_filter, self.estimation = W, Y
+    def update_once(self):
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_bins = self.n_bins
+
+        mu1, mu2 = self.step_prox_logdet, self.step_prox_penalty
+        alpha = self.step
+
+        X, w = self.input_vectorized, self.demix_filter_vectorized
+        y = self.y
+
+        w_tilde = self.prox_logdet(w - mu1 * mu2 * X.transpose(1, 0).conj() @ y, mu1) # update demix_filter
+        z = y + X @ (2 * w_tilde - w)
+        y_tilde = z - self.prox_penalty(z, 1 / mu2) # update demix_filter
+        y = alpha * y_tilde + (1 - alpha) * y
+        w = alpha * w_tilde + (1 - alpha) * w
+        
+        X = self.input
+        W = w.reshape(n_sources, n_channels, n_bins).transpose(2, 0, 1)
+        
+        Y = self.separate(X, demix_filter=W)
+
+        self.demix_filter_vectorized = w
+        self.demix_filter = W
+        self.estimation = Y
     
-    def apply_logdet_proximity(self, demix_filter, step):
-        raise NotImplementedError("Implement `apply_logdet_proximity` method")
+    def prox_logdet(self, demix_filter, step=1, is_vectorized=True):
+        """
+        Args:
+            demix_filter (n_sources * n_channels * n_bins) when `is_vectorized` is True, or (n_bins, n_sources, n_channels)
+            step <float>: step size
+        Returns:
+            demix_filter (n_sources * n_channels * n_bins) when `is_vectorized` is True, or (n_bins, n_sources, n_channels)
+        """
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_bins = self.n_bins
+
+        if is_vectorized:
+            W = demix_filter.reshape(n_sources, n_channels, n_bins).transpose(2, 0, 1) # -> (n_bins, n_sources, n_channels)
+        else:
+            W = demix_filter
+        U, Sigma, V = np.linalg.svd(W)
+        f = 128
+        Sigma = (Sigma + np.sqrt(Sigma**2 + 4 * step)) / 2
+        print(Sigma[f])
+        eyes = np.eye(n_sources, n_channels)
+        Sigma = eyes * Sigma[:, :, np.newaxis]
+        print(Sigma[f])
+        W_tilde = U @ Sigma @ V
+
+        if is_vectorized:
+            demix_filter = W_tilde.transpose(1, 2, 0).flatten()
+        else:
+            demix_filter = W_tilde
+        return demix_filter
     
-    def apply_penalty_proximity(self, estimation, step):
-        raise NotImplementedError("Implement `apply_penalty_proximity` method")
+    def prox_penalty(self, estimation, step=1):
+        raise NotImplementedError("Implement `prox_penalty` method")
+    
+    def compute_negative_loglikelihood(self):
+        loss = self.compute_penalty() + self.compute_negative_logdet()
 
-class ProxLaplaceIVA(ProxIVAbase):
-    def __init__(self, callback=None, eps=EPS):
-        super().__init__(callback=callback, eps=eps)
+        return loss
+    
+    def compute_penalty(self):
+        """
+        Args:
+            estimation (n_sources, n_bins, n_frames) <np.ndarray>
+        Returns:
+            loss <float>
+        """
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+        C = 2 # TODO
 
-        raise NotImplementedError("coming soon")
+        loss = np.sum(np.abs(Y)**2, axis=1) # (n_sources, n_frames)
+        loss = np.sqrt(loss) # (n_sources, n_frames)
+        loss = C * loss.sum(axis=(0, 1))
+        
+        return loss
+    
+    def compute_negative_logdet(self):
+        W = self.demix_filter
+        loss = - np.log(np.abs(np.linalg.det(W)))
+        loss = loss.sum()
+
+        return loss
+
+class ProxIVA(ProxIVAbase):
+    def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, callback=None, eps=EPS):
+        super().__init__(step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callback=callback, eps=eps)
+    
+    def prox_penalty(self, z, step=1, is_vectorized=True):
+        """
+        Args:
+            z (n_bins * n_sources * n_frames) <np.ndarray>
+            step <float>: step size parameter
+        Returns:
+            z_tilde <float> (n_bins * n_sources * n_frames)
+        """
+        mu2 = step
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_bins, n_frames = self.n_bins, self.n_frames
+
+        assert is_vectorized, "`is_vectorized` is expected True."
+        z = z.reshape(n_bins, n_sources, n_frames) # (n_bins, n_sources, n_frames) 
+
+        zsum = np.sum(np.abs(z)**2, axis=0)
+        z_tilde = np.maximum(0, 1 - mu2 / np.sqrt(zsum)) * z
+        z_tilde = z_tilde.flatten()
+
+        return z_tilde
 
 class SparseProxIVA(ProxIVAbase):
     """
@@ -436,6 +564,7 @@ def _test(method='AuxLaplaceIVA'):
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
 
     n_channels, T = mixed_signal.shape
+    mixed_signal = mixed_signal[:, :8192]
     
     # STFT
     fft_size, hop_size = 2048, 1024
@@ -456,7 +585,8 @@ def _test(method='AuxLaplaceIVA'):
         iva = AuxLaplaceIVA()
         iteration = 50
     elif method == 'ProxIVA':
-        raise NotImplementedError("Not support ProxIVA")
+        iva = ProxIVA()
+        iteration = 100
     else:
         raise ValueError("Not support method {}".format(method))
 
@@ -500,6 +630,7 @@ if __name__ == '__main__':
     """
 
     # _test_conv()
-    _test(method='GradLaplaceIVA')
-    _test(method='NaturalGradLaplaceIVA')
-    _test(method='AuxLaplaceIVA')
+    #_test(method='GradLaplaceIVA')
+    #_test(method='NaturalGradLaplaceIVA')
+    #_test(method='AuxLaplaceIVA')
+    _test(method='ProxIVA')
