@@ -1,9 +1,12 @@
 import numpy as np
+import scipy.sparse as sci_sparse
 
+from bss.prox import PDSBSSbase
 from algorithm.projection_back import projection_back
 
 EPS=1e-12
 THRESHOLD=1e+12
+__algorithm_spatial__ = ['IP', 'ISS']
 
 class IVAbase:
     def __init__(self, callback=None, eps=EPS):
@@ -83,6 +86,10 @@ class IVAbase:
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
 class GradIVAbase(IVAbase):
+    """
+    Reference: "Independent Vector Analysis: Definition and Algorithms"
+    See https://ieeexplore.ieee.org/document/4176796
+    """
     def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
         super().__init__(callback=callback, eps=eps)
 
@@ -215,9 +222,10 @@ class NaturalGradLaplaceIVA(GradIVAbase):
 
 
 class AuxIVAbase(IVAbase):
-    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
         super().__init__(callback=callback, eps=eps)
 
+        self.algorithm_spatial = algorithm_spatial
         self.reference_id = reference_id
         self.threshold = threshold
     
@@ -261,8 +269,8 @@ class AuxIVAbase(IVAbase):
 
 
 class AuxLaplaceIVA(AuxIVAbase):
-    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
-        super().__init__(reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
     
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -271,6 +279,10 @@ class AuxLaplaceIVA(AuxIVAbase):
 
         X, W = self.input, self.demix_filter
         Y = self.estimation
+
+        if not self.algorithm_spatial in __algorithm_spatial__:
+            raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
+        assert self.algorithm_spatial == 'IP', "Only `IP` is supported."
         
         X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
         X = X[...,np.newaxis]
@@ -315,13 +327,231 @@ class AuxLaplaceIVA(AuxIVAbase):
         return loss
 
 class AuxGaussIVA(AuxIVAbase):
-    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
-        super().__init__(reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
 
         raise NotImplementedError("in progress")
     
     def update_once(self):
         raise NotImplementedError("in progress...")
+
+class SparseAuxIVA(AuxIVAbase):
+    """
+    Reference: "A computationally cheaper method for blind speech separation based on AuxIVA and incomplete demixing transform"
+    See https://ieeexplore.ieee.org/document/7602921
+    """
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
+
+        raise NotImplementedError("in progress")
+    
+    def update_once(self):
+        raise NotImplementedError("in progress...")
+
+class ProxIVAbase(IVAbase):
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
+        """
+        Args:
+            regularizer <float>: Coefficient of source model penalty
+            step_prox_logdet <float>: step size parameter referenced `mu1` in "Determined Blind Source Separation via Proximal Splitting Algorithm"
+            step_prox_penalty <float>: step size parameter referenced `mu2` in "Determined Blind Source Separation via Proximal Splitting Algorithm"
+        """
+        super().__init__(callback=callback, eps=eps)
+
+        self.regularizer = regularizer
+        self.step_prox_logdet, self.step_prox_penalty = step_prox_logdet, step_prox_penalty
+        self.step = step
+        self.reference_id = reference_id
+    
+    def _reset(self, **kwargs):
+        super()._reset(**kwargs)
+
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_bins, n_frames = self.n_bins, self.n_frames
+
+        X, W = self.input, self.demix_filter
+        X = X.transpose(1, 2, 0).reshape(n_bins, n_frames, n_channels) # (n_channels, n_bins, n_frames) -> (n_bins, n_frames, n_channels)
+        
+        FNT, FNM = n_bins * n_sources * n_frames, n_bins * n_sources * n_channels
+        X = np.tile(X[:, np.newaxis, :, :], reps=(1, n_sources, 1, 1)).reshape(n_bins * n_sources, n_frames, n_channels)
+        indptr = np.arange(n_bins * n_sources + 1)
+        indices = np.arange(n_bins * n_sources)
+        X = sci_sparse.bsr_matrix((X, indices, indptr), shape=(FNT, FNM))
+        _, [norm], _ = sci_sparse.linalg.svds(X, k=1, which='LM') # Largest
+
+        self.input_sparse = X / norm
+        w = W.reshape(n_bins * n_sources * n_channels, 1) # (n_bins, n_sources, n_channels) -> (n_bins * n_sources * n_channels, 1)
+        self.demix_filter_sparse = sci_sparse.lil_matrix(w)
+        self.y = sci_sparse.lil_matrix((FNT, 1), dtype=np.complex128)
+    
+    def __call__(self, input, iteration, **kwargs):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+            iteration <int>
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        Y = super().__call__(input, iteration=iteration, **kwargs)
+
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        self.estimation = output
+
+        return output
+
+    def update_once(self):
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_bins = self.n_bins
+
+        mu1, mu2 = self.step_prox_logdet, self.step_prox_penalty
+        alpha = self.step
+
+        X, w = self.input_sparse, self.demix_filter_sparse
+        y = self.y
+
+        w_tilde = self.prox_logdet(w - mu1 * mu2 * X.T.conj() @ y, mu1) # update demix_filter
+        z = y + X @ (2 * w_tilde - w)
+        y_tilde = z - self.prox_penalty(z, 1 / mu2) # update demix_filter
+        y = alpha * y_tilde + (1 - alpha) * y
+        w = alpha * w_tilde + (1 - alpha) * w
+        
+        X = self.input
+        W = w.toarray().reshape(n_bins, n_sources, n_channels) # -> (n_bins, n_sources, n_channels)
+        
+        Y = self.separate(X, demix_filter=W)
+
+        self.y = y
+        self.demix_filter_sparse = w
+        self.demix_filter = W
+        self.estimation = Y
+    
+    def prox_logdet(self, demix_filter, mu=1, is_sparse=True):
+        """
+        Args:
+            demix_filter (n_sources * n_channels * n_bins) when `is_sparse` is True, or (n_bins, n_sources, n_channels)
+            mu <float>: 
+        Returns:
+            demix_filter (n_sources * n_channels * n_bins) when `is_sparse` is True, or (n_bins, n_sources, n_channels)
+        """
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_bins = self.n_bins
+
+        if is_sparse:
+            w = demix_filter.toarray()
+            W = w.reshape(n_bins, n_sources, n_channels) # -> (n_bins, n_sources, n_channels)
+        else:
+            W = demix_filter
+        U, Sigma, V = np.linalg.svd(W)
+        Sigma = (Sigma + np.sqrt(Sigma**2 + 4 * mu)) / 2
+        eyes = np.eye(n_sources, n_channels)
+        Sigma = eyes * Sigma[:, :, np.newaxis]
+        W_tilde = U @ Sigma @ V
+
+        if is_sparse:
+            w_tilde = W_tilde.reshape(n_bins * n_sources * n_channels, 1)
+            demix_filter = sci_sparse.lil_matrix(w_tilde)
+        else:
+            demix_filter = W_tilde
+        
+        return demix_filter
+    
+    def prox_penalty(self, demix_filter, mu=1):
+        raise NotImplementedError("Implement `prox_penalty` method")
+    
+    def compute_negative_loglikelihood(self):
+        loss = self.compute_penalty() + self.compute_negative_logdet()
+
+        return loss
+    
+    def compute_penalty(self):
+        raise NotImplementedError("Implement `compute_penalty` method")
+    
+    def compute_negative_logdet(self):
+        W = self.demix_filter
+        loss = - np.log(np.abs(np.linalg.det(W)))
+        loss = loss.sum()
+
+        return loss
+
+class ProxLaplaceIVA(PDSBSSbase):
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
+        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callback=callback, eps=eps)
+
+        self.reference_id = reference_id
+    
+    def __call__(self, input, iteration, **kwargs):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+            iteration <int>
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        Y = super().__call__(input, iteration=iteration, **kwargs)
+
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        self.estimation = output
+
+        return output
+    
+    def prox_penalty(self, z, mu=1, is_sparse=True):
+        """
+        Args:
+            z (n_bins * n_sources * n_frames, 1) <scipy.sparse.lil_matrix>
+            mu <float>: 
+        Returns:
+            z_tilde (n_bins * n_sources * n_frames, 1) <scipy.sparse.lil_matrix>
+        """
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_bins, n_frames = self.n_bins, self.n_frames
+        C = self.regularizer
+
+        assert is_sparse, "`is_sparse` is expected True."
+
+        z = z.toarray().reshape(n_bins, n_sources, n_frames) # (n_bins, n_sources, n_frames)
+        zsum = np.sum(np.abs(z)**2, axis=0)
+        denominator = np.sqrt(zsum) # (n_sources, n_frames)
+        denominator = np.where(denominator <= 0, mu, denominator)
+        z_tilde = C * np.maximum(0, 1 - mu / denominator) * z # TODO: correct?
+        z_tilde = z_tilde.reshape(n_bins * n_sources * n_frames, 1)
+        z_tilde = sci_sparse.lil_matrix(z_tilde)
+
+        return z_tilde
+    
+    def compute_penalty(self):
+        """
+        Returns:
+            loss <float>
+        """
+        C = self.regularizer
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+        
+        loss = np.sum(np.abs(Y)**2, axis=1) # (n_sources, n_frames)
+        loss = np.sqrt(loss) # (n_sources, n_frames)
+        loss = C * loss.sum(axis=(0, 1))
+        
+        return loss
+
+class SparseProxIVA(ProxIVAbase):
+    """
+    Reference: "Time-frequency-masking-based Determined BSS with Application to Sparse IVA"
+    See https://ieeexplore.ieee.org/document/8682217
+    """
+    def __init__(self, callback=None, eps=EPS):
+        super().__init__(callback=callback, eps=eps)
+
+        raise NotImplementedError("coming soon")
 
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
@@ -381,19 +611,24 @@ def _test(method='AuxLaplaceIVA'):
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # IVA
-    lr = 0.1
     n_sources = len(titles)
     iteration = 200
 
     if method == 'GradLaplaceIVA':
+        lr = 0.1
         iva = GradLaplaceIVA(lr=lr)
         iteration = 5000
     elif method == 'NaturalGradLaplaceIVA':
+        lr = 0.1
         iva = NaturalGradLaplaceIVA(lr=lr)
         iteration = 200
     elif method == 'AuxLaplaceIVA':
         iva = AuxLaplaceIVA()
         iteration = 50
+    elif method == 'ProxLaplaceIVA':
+        step = 1.75
+        iva = ProxLaplaceIVA(step=step)
+        iteration = 100
     else:
         raise ValueError("Not support method {}".format(method))
 
@@ -414,6 +649,20 @@ def _test(method='AuxLaplaceIVA'):
     plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
 
+def _test_conv():
+    sr = 16000
+    reverb = 0.16
+    duration = 0.5
+    samples = int(duration * sr)
+    mic_indices = [2, 5]
+    degrees = [60, 300]
+    titles = ['man-16000', 'woman-16000']
+
+    wav_path = "data/multi-channel/mixture-{}.wav".format(sr)
+
+    if not os.path.exists(wav_path):
+        mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
+        write_wav(wav_path, mixed_signal.T, sr=sr)
 
 if __name__ == '__main__':
     import os
@@ -421,22 +670,24 @@ if __name__ == '__main__':
     from scipy.io import loadmat
 
     from utils.utils_audio import read_wav, write_wav
-    from algorithm.stft import stft, istft
+    from transform.stft import stft, istft
+    from transform.whitening import whitening
 
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
     os.makedirs("data/IVA/GradLaplaceIVA", exist_ok=True)
-    os.makedirs("data/iVA/NaturalGradLaplaceIVA", exist_ok=True)
-    os.makedirs("data/iVA/AuxLaplaceIVA", exist_ok=True)
-
+    os.makedirs("data/IVA/NaturalGradLaplaceIVA", exist_ok=True)
+    os.makedirs("data/IVA/AuxLaplaceIVA", exist_ok=True)
+    os.makedirs("data/IVA/ProxLaplaceIVA", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
     Download database from "https://www.iks.rwth-aachen.de/en/research/tools-downloads/databases/multi-channel-impulse-response-database/"
     """
 
-    # _test_conv()
+    _test_conv()
     _test(method='GradLaplaceIVA')
     _test(method='NaturalGradLaplaceIVA')
     _test(method='AuxLaplaceIVA')
+    _test(method='ProxLaplaceIVA')
