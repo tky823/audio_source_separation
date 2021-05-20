@@ -674,6 +674,9 @@ def _test(method='AuxLaplaceIVA'):
     elif method == 'AuxLaplaceIVA':
         iva = AuxLaplaceIVA()
         iteration = 50
+    elif method == 'AuxGaussIVA':
+        iva = AuxGaussIVA()
+        iteration = 50
     elif method == 'ProxLaplaceIVA':
         step = 1.75
         iva = ProxLaplaceIVA(step=step)
@@ -728,6 +731,7 @@ if __name__ == '__main__':
     os.makedirs("data/IVA/GradLaplaceIVA", exist_ok=True)
     os.makedirs("data/IVA/NaturalGradLaplaceIVA", exist_ok=True)
     os.makedirs("data/IVA/AuxLaplaceIVA", exist_ok=True)
+    os.makedirs("data/IVA/AuxGaussIVA", exist_ok=True)
     os.makedirs("data/IVA/ProxLaplaceIVA", exist_ok=True)
 
     """
@@ -735,8 +739,9 @@ if __name__ == '__main__':
     Download database from "https://www.iks.rwth-aachen.de/en/research/tools-downloads/databases/multi-channel-impulse-response-database/"
     """
 
-    _test_conv()
-    _test(method='GradLaplaceIVA')
-    _test(method='NaturalGradLaplaceIVA')
-    _test(method='AuxLaplaceIVA')
-    _test(method='ProxLaplaceIVA')
+    #_test_conv()
+    #_test(method='GradLaplaceIVA')
+    #_test(method='NaturalGradLaplaceIVA')
+    #_test(method='AuxLaplaceIVA')
+    _test(method='AuxGaussIVA')
+    #_test(method='ProxLaplaceIVA')
