@@ -472,8 +472,8 @@ class ProxIVAbase(IVAbase):
         return loss
 
 class ProxLaplaceIVA(ProxIVAbase):
-    def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
-        super().__init__(step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, reference_id=reference_id, callback=callback, eps=eps)
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
+        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, reference_id=reference_id, callback=callback, eps=eps)
     
     def prox_penalty(self, z, mu=1, is_sparse=True):
         """
