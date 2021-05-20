@@ -6,6 +6,7 @@ from algorithm.projection_back import projection_back
 
 EPS=1e-12
 THRESHOLD=1e+12
+__algorithm_spatial__ = ['IP', 'ISS']
 
 class IVAbase:
     def __init__(self, callback=None, eps=EPS):
@@ -221,9 +222,10 @@ class NaturalGradLaplaceIVA(GradIVAbase):
 
 
 class AuxIVAbase(IVAbase):
-    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
         super().__init__(callback=callback, eps=eps)
 
+        self.algorithm_spatial = algorithm_spatial
         self.reference_id = reference_id
         self.threshold = threshold
     
@@ -267,8 +269,8 @@ class AuxIVAbase(IVAbase):
 
 
 class AuxLaplaceIVA(AuxIVAbase):
-    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
-        super().__init__(reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
     
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -277,6 +279,10 @@ class AuxLaplaceIVA(AuxIVAbase):
 
         X, W = self.input, self.demix_filter
         Y = self.estimation
+
+        if not self.algorithm_spatial in __algorithm_spatial__:
+            raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
+        assert self.algorithm_spatial == 'IP', "Only `IP` is supported."
         
         X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
         X = X[...,np.newaxis]
@@ -321,8 +327,8 @@ class AuxLaplaceIVA(AuxIVAbase):
         return loss
 
 class AuxGaussIVA(AuxIVAbase):
-    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
-        super().__init__(reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
 
         raise NotImplementedError("in progress")
     
@@ -334,8 +340,8 @@ class SparseAuxIVA(AuxIVAbase):
     Reference: "A computationally cheaper method for blind speech separation based on AuxIVA and incomplete demixing transform"
     See https://ieeexplore.ieee.org/document/7602921
     """
-    def __init__(self, reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
-        super().__init__(reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callback=callback, eps=eps, threshold=threshold)
 
         raise NotImplementedError("in progress")
     
