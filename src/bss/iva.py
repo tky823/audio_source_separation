@@ -342,9 +342,16 @@ class SparseAuxIVA(AuxIVAbase):
         raise NotImplementedError("in progress...")
 
 class ProxIVAbase(IVAbase):
-    def __init__(self, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
+        """
+        Args:
+            regularizer <float>: Coefficient of source model penalty
+            step_prox_logdet <float>: step size parameter referenced `mu1` in "Determined Blind Source Separation via Proximal Splitting Algorithm"
+            step_prox_penalty <float>: step size parameter referenced `mu2` in "Determined Blind Source Separation via Proximal Splitting Algorithm"
+        """
         super().__init__(callback=callback, eps=eps)
 
+        self.regularizer = regularizer
         self.step_prox_logdet, self.step_prox_penalty = step_prox_logdet, step_prox_penalty
         self.step = step
         self.reference_id = reference_id
@@ -478,6 +485,7 @@ class ProxLaplaceIVA(ProxIVAbase):
         """
         n_sources, n_channels = self.n_sources, self.n_channels
         n_bins, n_frames = self.n_bins, self.n_frames
+        C = self.regularizer
 
         assert is_sparse, "`is_sparse` is expected True."
 
@@ -485,7 +493,7 @@ class ProxLaplaceIVA(ProxIVAbase):
         zsum = np.sum(np.abs(z)**2, axis=0)
         denominator = np.sqrt(zsum)
         denominator = np.where(denominator <= 0, mu, denominator)
-        z_tilde = np.maximum(0, 1 - mu / denominator) * z
+        z_tilde = C * np.maximum(0, 1 - mu / denominator) * z # TODO: correct?
         z_tilde = z_tilde.reshape(n_bins * n_sources * n_frames, 1)
         z_tilde = sci_sparse.lil_matrix(z_tilde)
 
@@ -493,14 +501,12 @@ class ProxLaplaceIVA(ProxIVAbase):
     
     def compute_penalty(self):
         """
-        Args:
-            estimation (n_sources, n_bins, n_frames) <np.ndarray>
         Returns:
             loss <float>
         """
+        C = self.regularizer
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
-        C = 2 # TODO
 
         loss = np.sum(np.abs(Y)**2, axis=1) # (n_sources, n_frames)
         loss = np.sqrt(loss) # (n_sources, n_frames)
