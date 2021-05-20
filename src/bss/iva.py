@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.sparse as sci_sparse
 
+from bss.prox import PDSBSSbase
 from algorithm.projection_back import projection_back
 
 EPS=1e-12
@@ -471,9 +472,31 @@ class ProxIVAbase(IVAbase):
 
         return loss
 
-class ProxLaplaceIVA(ProxIVAbase):
+class ProxLaplaceIVA(PDSBSSbase):
     def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, eps=EPS):
-        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, reference_id=reference_id, callback=callback, eps=eps)
+        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callback=callback, eps=eps)
+
+        self.reference_id = reference_id
+    
+    def __call__(self, input, iteration, **kwargs):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+            iteration <int>
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        Y = super().__call__(input, iteration=iteration, **kwargs)
+
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        self.estimation = output
+
+        return output
     
     def prox_penalty(self, z, mu=1, is_sparse=True):
         """
@@ -491,7 +514,7 @@ class ProxLaplaceIVA(ProxIVAbase):
 
         z = z.toarray().reshape(n_bins, n_sources, n_frames) # (n_bins, n_sources, n_frames)
         zsum = np.sum(np.abs(z)**2, axis=0)
-        denominator = np.sqrt(zsum)
+        denominator = np.sqrt(zsum) # (n_sources, n_frames)
         denominator = np.where(denominator <= 0, mu, denominator)
         z_tilde = C * np.maximum(0, 1 - mu / denominator) * z # TODO: correct?
         z_tilde = z_tilde.reshape(n_bins * n_sources * n_frames, 1)
@@ -507,7 +530,7 @@ class ProxLaplaceIVA(ProxIVAbase):
         C = self.regularizer
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
-
+        
         loss = np.sum(np.abs(Y)**2, axis=1) # (n_sources, n_frames)
         loss = np.sqrt(loss) # (n_sources, n_frames)
         loss = C * loss.sum(axis=(0, 1))
