@@ -377,10 +377,13 @@ class AuxGaussIVA(AuxIVAbase):
         self.estimation = Y
     
     def compute_negative_loglikelihood(self):
+        n_bins, n_frames = self.n_bins, self.n_frames
+        n_sources = self.n_sources
+        
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
-        P = np.mean(np.abs(Y)**2, axis=1)
-        loss = 2 * np.sum(P, axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+
+        loss = (n_bins * n_frames * n_sources) / 2 - 2 * np.log(np.abs(np.linalg.det(W))).sum()
 
         return loss
 
