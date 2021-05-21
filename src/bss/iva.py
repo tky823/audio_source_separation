@@ -76,6 +76,12 @@ class IVAbase:
         output = self.separate(X, demix_filter=W)
 
         return output
+    
+    def __repr__(self) -> str:
+        s = "IVA("
+        s += ")"
+
+        return s.format(**self.__dict__)
 
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function")
@@ -152,6 +158,13 @@ class GradIVAbase(IVAbase):
 
         return output
     
+    def __repr__(self) -> str:
+        s = "GradIVA("
+        s += "lr={lr}"
+        s += ")"
+
+        return s.format(**self.__dict__)
+    
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function")
 
@@ -164,6 +177,13 @@ class GradLaplaceIVA(GradIVAbase):
 
         self.lr = lr
         self.reference_id = reference_id
+    
+    def __repr__(self) -> str:
+        s = "NaturalGradIVA("
+        s += "lr={lr}"
+        s += ")"
+
+        return s.format(**self.__dict__)
     
     def update_once(self):
         n_frames = self.n_frames
@@ -208,6 +228,13 @@ class NaturalGradLaplaceIVA(GradIVAbase):
 
         self.lr = lr
         self.reference_id = reference_id
+    
+    def __repr__(self) -> str:
+        s = "NaturalGradLaplaceIVA("
+        s += "lr={lr}"
+        s += ")"
+
+        return s.format(**self.__dict__)
 
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -291,6 +318,13 @@ class AuxIVAbase(IVAbase):
 
         return output
     
+    def __repr__(self) -> str:
+        s = "AuxIVA("
+        s += "algorithm_spatial={algorithm_spatial}"
+        s += ")"
+
+        return s.format(**self.__dict__)
+    
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function.")
 
@@ -343,6 +377,13 @@ class AuxLaplaceIVA(AuxIVAbase):
         self.estimation = output
 
         return output
+    
+    def __repr__(self) -> str:
+        s = "AuxLaplaceIVA("
+        s += "algorithm_spatial={algorithm_spatial}"
+        s += ")"
+
+        return s.format(**self.__dict__)
     
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -417,6 +458,55 @@ class AuxLaplaceIVA(AuxIVAbase):
 class AuxGaussIVA(AuxIVAbase):
     def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+    
+    def __call__(self, input, iteration=100, **kwargs):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames)
+        Returns:
+            output (n_channels, n_bins, n_frames)
+        """
+        self.input = input
+
+        self._reset(**kwargs)
+
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+
+        for idx in range(iteration):
+            self.update_once()
+
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
+
+            if self.callbacks is not None:
+                if self.algorithm_spatial == 'ISS':
+                    # In `update_once()`, demix_filter isn't updated
+                    # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+                    X, Y = self.input, self.estimation
+                    self.demix_filter = self.compute_demix_filter(Y, X)
+                
+                for callback in self.callbacks:
+                    callback(self)
+
+        reference_id = self.reference_id
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+
+        scale = projection_back(Y, reference=X[reference_id])
+        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        self.estimation = output
+
+        return output
+
+    def __repr__(self) -> str:
+        s = "AuxGaussIVA("
+        s += "algorithm_spatial={algorithm_spatial}"
+        s += ")"
+
+        return s.format(**self.__dict__)
     
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -528,6 +618,13 @@ class ProxLaplaceIVA(PDSBSSbase):
         self.estimation = output
 
         return output
+    
+    def __repr__(self) -> str:
+        s = "ProxLaplaceIVA("
+        s += "algorithm_spatial={algorithm_spatial}"
+        s += ")"
+
+        return s.format(**self.__dict__)
     
     def prox_penalty(self, z, mu=1, is_sparse=True):
         """
@@ -726,10 +823,26 @@ if __name__ == '__main__':
     """
 
     _test_conv()
+    print("="*10, "GradLaplaceIVA", "="*10)
     _test(method='GradLaplaceIVA')
+    print()
+    print("="*10, "NaturalGradLaplaceIVA", "="*10)
     _test(method='NaturalGradLaplaceIVA')
+    print()
+    print("="*10, "AuxIVA-IP", "="*10)
+    print("-"*10, "AuxLaplaceIVA-IP", "-"*10)
     _test(method='AuxLaplaceIVA-IP')
+    print()
+    print("-"*10, "AuxGaussIVA-IP", "-"*10)
     _test(method='AuxGaussIVA-IP')
+    print()
+    print("="*10, "AuxIVA-ISS", "="*10)
+    print("-"*10, "AuxLaplaceIVA-ISS", "-"*10)
     _test(method='AuxLaplaceIVA-ISS')
+    print()
+    print("-"*10, "AuxGaussIVA-ISS", "-"*10)
     _test(method='AuxGaussIVA-ISS')
+    print()
+    print("="*10, "ProxIVA", "="*10)
+    print("-"*10, "ProxLaplaceIVA", "-"*10)
     _test(method='ProxLaplaceIVA')
