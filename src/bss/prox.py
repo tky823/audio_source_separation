@@ -14,7 +14,7 @@ class PDSBSSbase:
     """
         Blind source separation using Primal-dual splitting algorithm
     """
-    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, callback=None, eps=EPS):
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             regularizer <float>: Coefficient of source model penalty
@@ -25,11 +25,20 @@ class PDSBSSbase:
         self.step_prox_logdet, self.step_prox_penalty = step_prox_logdet, step_prox_penalty
         self.step = step
 
-        self.callback = callback
+        if callbacks is not None:
+            if callable(callbacks):
+                callbacks = [callbacks]
+            self.callbacks = callbacks
+        else:
+            self.callbacks = None
         self.eps = eps
 
         self.input = None
-        self.loss = []
+        self.recordable_loss = recordable_loss
+        if self.recordable_loss:
+            self.loss = []
+        else:
+            self.loss = None
     
     def _reset(self, **kwargs):
         assert self.input is not None, "Specify data!"
@@ -89,8 +98,9 @@ class PDSBSSbase:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
         
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
