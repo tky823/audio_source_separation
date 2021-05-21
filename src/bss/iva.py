@@ -367,6 +367,7 @@ class AuxLaplaceIVA(AuxIVAbase):
         elif self.algorithm_spatial == 'ISS':
             P = np.sum(np.abs(Y)**2, axis=1) # (n_sources, n_frames)
             R = 2 * np.sqrt(P) # (n_sources, n_frames)
+            R[R < eps] = eps
 
             for n in range(n_sources):
                 U_n = np.sum(Y * Y[n].conj() / R[:, np.newaxis, :], axis=2) # (n_sources, n_bins)
