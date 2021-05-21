@@ -9,8 +9,13 @@ THRESHOLD=1e+12
 __algorithm_spatial__ = ['IP', 'ISS']
 
 class IVAbase:
-    def __init__(self, callback=None, recordable_loss=True, eps=EPS):
-        self.callback = callback
+    def __init__(self, callbacks=None, recordable_loss=True, eps=EPS):
+        if callbacks is not None:
+            if callable(callbacks):
+                callbacks = [callbacks]
+            self.callbacks = callbacks
+        else:
+            self.callbacks = None
         self.eps = eps
 
         self.input = None
@@ -63,8 +68,9 @@ class IVAbase:
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
         
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
@@ -96,8 +102,8 @@ class GradIVAbase(IVAbase):
     Reference: "Independent Vector Analysis: Definition and Algorithms"
     See https://ieeexplore.ieee.org/document/4176796
     """
-    def __init__(self, lr=1e-1, reference_id=0, callback=None, recordable_loss=True, eps=EPS):
-        super().__init__(callback=callback, recordable_loss=recordable_loss, eps=eps)
+    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.lr = lr
         self.reference_id = reference_id
@@ -124,8 +130,9 @@ class GradIVAbase(IVAbase):
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
@@ -144,8 +151,8 @@ class GradIVAbase(IVAbase):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
 class GradLaplaceIVA(GradIVAbase):
-    def __init__(self, lr=1e-1, reference_id=0, callback=None, recordable_loss=True, eps=EPS):
-        super().__init__(callback=callback, recordable_loss=recordable_loss, eps=eps)
+    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.lr = lr
         self.reference_id = reference_id
@@ -188,8 +195,8 @@ class GradLaplaceIVA(GradIVAbase):
 
 
 class NaturalGradLaplaceIVA(GradIVAbase):
-    def __init__(self, lr=1e-1, reference_id=0, callback=None, recordable_loss=True, eps=EPS):
-        super().__init__(lr=lr, reference_id=reference_id, callback=callback, recordable_loss=recordable_loss, eps=eps)
+    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.lr = lr
         self.reference_id = reference_id
@@ -231,8 +238,8 @@ class NaturalGradLaplaceIVA(GradIVAbase):
 
 
 class AuxIVAbase(IVAbase):
-    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
-        super().__init__(callback=callback, recordable_loss=recordable_loss, eps=eps)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.algorithm_spatial = algorithm_spatial
         self.reference_id = reference_id
@@ -259,8 +266,9 @@ class AuxIVAbase(IVAbase):
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
@@ -280,8 +288,8 @@ class AuxIVAbase(IVAbase):
 
 
 class AuxLaplaceIVA(AuxIVAbase):
-    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
-        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callback=callback, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -305,14 +313,15 @@ class AuxLaplaceIVA(AuxIVAbase):
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
 
-            if self.callback is not None:
+            if self.callbacks is not None:
                 if self.algorithm_spatial == 'ISS':
                     # In `update_once()`, demix_filter isn't updated
                     # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                     X, Y = self.input, self.estimation
                     self.demix_filter = self.compute_demix_filter(Y, X)
-
-                self.callback(self)
+                
+                for callback in self.callbacks:
+                    callback(self)
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
@@ -402,8 +411,8 @@ class AuxLaplaceIVA(AuxIVAbase):
         return loss
 
 class AuxGaussIVA(AuxIVAbase):
-    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
-        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callback=callback, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
     
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -466,8 +475,8 @@ class SparseAuxIVA(AuxIVAbase):
     Reference: "A computationally cheaper method for blind speech separation based on AuxIVA and incomplete demixing transform"
     See https://ieeexplore.ieee.org/document/7602921
     """
-    def __init__(self, algorithm_spatial='IP', reference_id=0, callback=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
-        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callback=callback, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
 
         raise NotImplementedError("in progress")
     
@@ -475,14 +484,14 @@ class SparseAuxIVA(AuxIVAbase):
         raise NotImplementedError("in progress...")
 
 class ProxIVAbase(IVAbase):
-    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, recordable_loss=True, eps=EPS):
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             regularizer <float>: Coefficient of source model penalty
             step_prox_logdet <float>: step size parameter referenced `mu1` in "Determined Blind Source Separation via Proximal Splitting Algorithm"
             step_prox_penalty <float>: step size parameter referenced `mu2` in "Determined Blind Source Separation via Proximal Splitting Algorithm"
         """
-        super().__init__(callback=callback, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.regularizer = regularizer
         self.step_prox_logdet, self.step_prox_penalty = step_prox_logdet, step_prox_penalty
@@ -605,8 +614,8 @@ class ProxIVAbase(IVAbase):
         return loss
 
 class ProxLaplaceIVA(PDSBSSbase):
-    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, recordable_loss=True, eps=EPS):
-        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callback=callback, recordable_loss=recordable_loss, eps=eps)
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
     
@@ -674,8 +683,8 @@ class SparseProxIVA(PDSBSSbase):
     Reference: "Time-frequency-masking-based Determined BSS with Application to Sparse IVA"
     See https://ieeexplore.ieee.org/document/8682217
     """
-    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callback=None, recordable_loss=True, eps=EPS):
-        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callback=callback, recordable_loss=recordable_loss, eps=eps)
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
 
