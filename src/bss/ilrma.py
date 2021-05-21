@@ -94,6 +94,15 @@ class ILRMAbase:
         output = self.separate(X, demix_filter=W)
 
         return output
+    
+    def __repr__(self) -> str:
+        s = "ILRMA("
+        s += "n_bases={n_bases}"
+        s += ", partitioning={partitioning}"
+        s += ", normalize={normalize}"
+        s += ")"
+
+        return s.format(**self.__dict__)
 
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function")
@@ -167,6 +176,16 @@ class GaussILRMA(ILRMAbase):
         self.estimation = output
 
         return output
+
+    def __repr__(self) -> str:
+        s = "GaussILRMA("
+        s += "n_bases={n_bases}"
+        s += ", domain={domain}"
+        s += ", partitioning={partitioning}"
+        s += ", normalize={normalize}"
+        s += ")"
+
+        return s.format(**self.__dict__)
 
     def update_once(self):
         eps = self.eps
@@ -410,6 +429,17 @@ class tILRMA(ILRMAbase):
         self.estimation = output
 
         return output
+    
+    def __repr__(self) -> str:
+        s = "tILRMA("
+        s += "n_bases={n_bases}"
+        s += ", nu={nu}"
+        s += ", domain={domain}"
+        s += ", partitioning={partitioning}"
+        s += ", normalize={normalize}"
+        s += ")"
+
+        return s.format(**self.__dict__)
     
     def update_once(self):
         eps = self.eps
@@ -706,6 +736,16 @@ class ConsistentGaussILRMA(GaussILRMA):
 
         return output
     
+    def __repr__(self) -> str:
+        s = "ConsistentGaussILRMA("
+        s += "n_bases={n_bases}"
+        s += ", domain={domain}"
+        s += ", partitioning={partitioning}"
+        s += ", normalize={normalize}"
+        s += ")"
+
+        return s.format(**self.__dict__)
+    
     def update_once(self):
         y = istft(self.estimation, fft_size=self.fft_size, hop_size=self.hop_size)
         self.estimation = stft(y, fft_size=self.fft_size, hop_size=self.hop_size)
@@ -796,6 +836,8 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
         ilrma = tILRMA(n_bases=n_bases, nu=nu, partitioning=partitioning)
     else:
         raise ValueError("Not support {}-ILRMA.".format(method))
+    
+    print(ilrma)
     estimation = ilrma(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
@@ -895,8 +937,21 @@ if __name__ == '__main__':
     """
 
     _test_conv()
+    print("="*10, "Gauss-ILRMA", "="*10)
+    print("-"*10, "with partitioning function", "-"*10)
     _test(method='Gauss', n_bases=2, partitioning=False)
+    print()
+
+    print("-"*10, "without partitioning function", "-"*10)
     _test(method='Gauss', n_bases=5, partitioning=True)
+    print()
+
+    print("="*10, "t-ILRMA", "="*10)
+    print("-"*10, "without partitioning function", "-"*10)
     _test(method='t', n_bases=2, partitioning=False)
+    print()
     # _test(method='t', n_bases=5, partitioning=True)
+
+    print("="*10, "Consistent-ILRMA", "="*10)
     _test_consistent_ilrma(n_bases=5, partitioning=False)
+    print()
