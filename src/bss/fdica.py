@@ -74,6 +74,12 @@ class FDICAbase:
         output = self.separate(X, demix_filter=W)
 
         return output
+    
+    def __repr__(self) -> str:
+        s = "FDICA("
+        s += ")"
+
+        return s.format(**self.__dict__)
 
     def update_once(self):
         raise NotImplementedError("Implement 'update' function")
@@ -176,6 +182,13 @@ class GradFDICAbase(FDICAbase):
 
         return output
     
+    def __repr__(self) -> str:
+        s = "GradFDICA("
+        s += "lr={lr}"
+        s += ")"
+
+        return s.format(**self.__dict__)
+    
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
@@ -209,6 +222,13 @@ class GradLaplaceFDICA(GradFDICAbase):
         self.demix_filter = W
         self.estimation = Y
     
+    def __repr__(self) -> str:
+        s = "GradLaplaceFDICA("
+        s += "lr={lr}"
+        s += ")"
+
+        return s.format(**self.__dict__)
+    
     def compute_negative_loglikelihood(self):
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
@@ -223,6 +243,14 @@ class NaturalGradLaplaceFDICA(GradFDICAbase):
         super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.is_holonomic = is_holonomic
+    
+    def __repr__(self) -> str:
+        s = "GradLaplaceFDICA("
+        s += "lr={lr}"
+        s += ", is_holonomic={is_holonomic}"
+        s += ")"
+
+        return s.format(**self.__dict__)
 
     def update_once(self):
         n_sources, n_channels = self.n_sources, self.n_channels
