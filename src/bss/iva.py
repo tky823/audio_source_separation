@@ -480,11 +480,13 @@ class AuxGaussIVA(AuxIVAbase):
     
     def compute_negative_loglikelihood(self):
         X, W = self.input, self.demix_filter
+        n_bins = self.n_bins
+        eps = self.eps
         Y = self.separate(X, demix_filter=W)
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
         R = P.mean(axis=1) # (n_sources, n_frames)
-        
-        loss = np.sum(R, axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+        R[R < eps] = eps
+        loss = (2 * n_bins) * np.sum(np.log(R), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
 
         return loss
 
@@ -628,7 +630,7 @@ def _test(method='AuxLaplaceIVA'):
     titles = ['man-16000', 'woman-16000']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-
+    
     n_channels, T = mixed_signal.shape
     
     # STFT
