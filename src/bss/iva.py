@@ -409,7 +409,8 @@ class AuxLaplaceIVA(AuxIVAbase):
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
         P = np.sum(np.abs(Y)**2, axis=1)
-        loss = 2 * np.sum(np.sqrt(P), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+        R = 2 * np.sqrt(P)
+        loss = np.sum(R, axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
 
         return loss
 
@@ -478,12 +479,12 @@ class AuxGaussIVA(AuxIVAbase):
         self.estimation = Y
     
     def compute_negative_loglikelihood(self):
-        n_bins, n_frames = self.n_bins, self.n_frames
-        n_sources = self.n_sources
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        R = P.mean(axis=1) # (n_sources, n_frames)
         
-        W = self.demix_filter
-        
-        loss = (n_bins * n_frames * n_sources) / 2 - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+        loss = np.sum(R, axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
 
         return loss
 
