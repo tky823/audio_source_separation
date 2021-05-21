@@ -10,15 +10,25 @@ class ILRMAbase:
     """
     Independent Low-rank Matrix Analysis
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, callback=None, eps=EPS):
-        self.callback = callback
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, callbacks=None, recordable_loss=True, eps=EPS):
+        if callbacks is not None:
+            if callable(callbacks):
+                callbacks = [callbacks]
+            self.callbacks = callbacks
+        else:
+            self.callbacks = None
         self.eps = eps
-        self.input = None
+        
         self.n_bases = n_bases
-        self.loss = []
-
         self.partitioning = partitioning
         self.normalize = normalize
+
+        self.input = None
+        self.recordable_loss = recordable_loss
+        if self.recordable_loss:
+            self.loss = []
+        else:
+            self.loss = None
     
     def _reset(self, **kwargs):
         assert self.input is not None, "Specify data!"
@@ -76,8 +86,9 @@ class ILRMAbase:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
         
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
@@ -109,13 +120,13 @@ class GaussILRMA(ILRMAbase):
     Reference: "Determined Blind Source Separation Unifying Independent Vector Analysis and Nonnegative Matrix Factorization"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, domain=2, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_bases=10, domain=2, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
 
@@ -143,8 +154,9 @@ class GaussILRMA(ILRMAbase):
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
         
         reference_id = self.reference_id
         X, W = input, self.demix_filter
@@ -352,14 +364,14 @@ class tILRMA(ILRMAbase):
     Reference: "Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation"
     See: https://ieeexplore.ieee.org/document/8168129
     """
-    def __init__(self, n_bases=10, nu=1, domain=2, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, nu=1, domain=2, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             nu: degree of freedom. nu = 1: Cauchy distribution, nu -> infty: Gaussian distribution.
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.nu = nu
         self.domain = domain
@@ -385,8 +397,9 @@ class tILRMA(ILRMAbase):
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
         
         reference_id = self.reference_id
         X, W = input, self.demix_filter
@@ -581,8 +594,8 @@ class KLILRMA(ILRMAbase):
     """
     Reference: "Independent Low-Rank Matrix Analysis Based on Generalized Kullback-Leibler Divergence"
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
+    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
 
@@ -608,8 +621,9 @@ class KLILRMA(ILRMAbase):
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
         
         reference_id = self.reference_id
         X, W = input, self.demix_filter
@@ -626,12 +640,12 @@ class RegularizedILRMA(ILRMAbase):
     Reference: "Blind source separation based on independent low-rank matrix analysis with sparse regularization for time-series activity"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callback=None, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             normalize <str>
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callback=callback, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
 
@@ -642,13 +656,13 @@ class ConsistentGaussILRMA(GaussILRMA):
     Reference: "Consistent independent low-rank matrix analysis for determined blind source separation"
     See https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-020-00704-4
     """
-    def __init__(self, n_bases=10, partitioning=False, reference_id=0, fft_size=None, hop_size=None, callback=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_bases=10, partitioning=False, reference_id=0, fft_size=None, hop_size=None, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=False, reference_id=reference_id, threshold=threshold, callback=callback, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=False, reference_id=reference_id, threshold=threshold, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         if fft_size is None:
             raise ValueError("Specify `fft_size`.")
@@ -678,8 +692,9 @@ class ConsistentGaussILRMA(GaussILRMA):
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
         
         reference_id = self.reference_id
         X, W = input, self.demix_filter
