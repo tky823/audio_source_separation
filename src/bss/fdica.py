@@ -6,13 +6,22 @@ from algorithm.projection_back import projection_back
 EPS=1e-12
 
 class FDICAbase:
-    def __init__(self, callback=None, eps=EPS):
-        self.callback = callback
+    def __init__(self, callbacks=None, recordable_loss=True, eps=EPS):
+        if callbacks is not None:
+            if callable(callbacks):
+                callbacks = [callbacks]
+            self.callbacks = callbacks
+        else:
+            self.callbacks = None
         self.eps = eps
 
         self.input = None
         self.criterion = None
-        self.loss = []
+        self.recordable_loss = recordable_loss
+        if self.recordable_loss:
+            self.loss = []
+        else:
+            self.loss = None
 
     def _reset(self, **kwargs):
         assert self.input is not None, "Specify data!"
@@ -46,16 +55,20 @@ class FDICAbase:
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()
-        self.loss.append(loss)
-
-        for idx in range(iteration):
-            self.update_once()
+        if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+        for idx in range(iteration):
+            self.update_once()
+
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
+
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
         
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
@@ -118,8 +131,8 @@ class FDICAbase:
 
 
 class GradFDICAbase(FDICAbase):
-    def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
-        super().__init__(callback=callback, eps=eps)
+    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.lr = lr
         self.reference_id = reference_id
@@ -135,16 +148,21 @@ class GradFDICAbase(FDICAbase):
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()
-        self.loss.append(loss)
-
-        for idx in range(iteration):
-            self.update_once()
+        if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
-            if self.callback is not None:
-                self.callback(self)
+
+        for idx in range(iteration):
+            self.update_once()
+
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
+
+            if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
         
         self.solve_permutation()
 
@@ -162,8 +180,8 @@ class GradFDICAbase(FDICAbase):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
 class GradLaplaceFDICA(GradFDICAbase):
-    def __init__(self, lr=1e-1, reference_id=0, callback=None, eps=EPS):
-        super().__init__(lr=lr, reference_id=reference_id, callback=callback, eps=eps)
+    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
     
     def update_once(self):
         n_frames = self.n_frames
@@ -201,8 +219,8 @@ class GradLaplaceFDICA(GradFDICAbase):
         return loss
 
 class NaturalGradLaplaceFDICA(GradFDICAbase):
-    def __init__(self, lr=1e-1, reference_id=0, is_holonomic=True, callback=None, eps=EPS):
-        super().__init__(lr=lr, reference_id=reference_id, callback=callback, eps=eps)
+    def __init__(self, lr=1e-1, reference_id=0, is_holonomic=True, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.is_holonomic = is_holonomic
 
