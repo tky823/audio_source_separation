@@ -373,6 +373,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
                 self.loss.append(loss)
 
             if self.callbacks is not None:
+                self.estimation = self.separate(self.input)
                 for callback in self.callbacks:
                     callback(self)
         
