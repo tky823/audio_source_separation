@@ -49,7 +49,7 @@ class MultichannelNMFbase:
 
         if n_sources is None:
             n_sources = n_channels
-        self.n_sources, self.n_channels = n_channels, n_sources
+        self.n_sources, self.n_channels = n_sources, n_channels
         self.n_bins, self.n_frames = n_bins, n_frames
     
     def __call__(self, input, iteration=100, **kwargs):
@@ -385,13 +385,13 @@ class FastMultichannelISNMF(MultichannelNMFbase):
     
     def __repr__(self):
         s = "FastMNMF("
-        if hasattr(self, 'n_sources'):
-            s += "n_sources={n_sources}, "
-        if hasattr(self, 'n_channels'):
-            s += "n_channels={n_channels}, "
         s += "n_bases={n_bases}, "
-        s += "partitioning={partitioning}, "
-        s += "normalize={normalize}"
+        if hasattr(self, 'n_sources'):
+            s += ", n_sources={n_sources}"
+        if hasattr(self, 'n_channels'):
+            s += ", n_channels={n_channels}"
+        s += ", partitioning={partitioning}"
+        s += ", normalize={normalize}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -560,6 +560,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
             Lambda = W @ H
         
         y_tilde = np.sum(Lambda[..., np.newaxis] * g[:, :, np.newaxis, :], axis=0) # (n_bins, n_frames, n_channels)
+        # TODO: shape
         QX = np.sum(Q[:, np.newaxis, :, :] * X[:, :, np.newaxis, :], axis=3) # (n_bins, n_channels, n_channels) (n_bins, n_frames, n_channels) -> (n_bins, n_frames, n_channels)
         x_tilde = np.abs(QX)**2 # (n_bins, n_frames, n_channels)
         detQQ = np.abs(np.linalg.det(Q @ Q.transpose(0, 2, 1))) # (n_bins,)
