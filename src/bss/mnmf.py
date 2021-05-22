@@ -348,7 +348,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
                 self.activation = np.random.rand(n_sources, n_bases, n_frames)
         # TODO: normalize Q
         self.diagonalizer = Q
-        self.space_covariance = G
+        self.spatial_covariance = G
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -405,7 +405,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
             # normalize
             if self.normalize == 'power':
                 Q = self.diagonalizer
-                g = self.space_covariance
+                g = self.spatial_covariance
                 W, H = self.base, self.activation
 
                 if self.partitioning:
@@ -426,14 +426,14 @@ class FastMultichannelISNMF(MultichannelNMFbase):
 
                     self.base, self.activation = W, H
                     self.diagonalizer = Q
-                    self.space_covariance = g
+                    self.spatial_covariance = g
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power'".format(self.normalize))
 
     def update_NMF(self):
         eps = self.eps
         X = self.input.transpose(1, 2, 0)
-        g = self.space_covariance
+        g = self.spatial_covariance
         Q = self.diagonalizer
         W, H = self.base, self.activation
 
@@ -472,7 +472,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
     
     def update_SCM(self):
         eps = self.eps
-        g = self.space_covariance
+        g = self.spatial_covariance
         W, H = self.base, self.activation
         X = self.input.transpose(1, 2, 0)
         Q = self.diagonalizer
@@ -498,7 +498,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
         B = np.sum(Lambda[..., np.newaxis] / R[np.newaxis], axis=2)
         g *= np.sqrt(A / B)
 
-        self.space_covariance = g
+        self.spatial_covariance = g
     
     def update_diagonalizer(self):
         n_bins = self.n_bins
@@ -507,7 +507,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
 
         X = self.input.transpose(1, 2, 0)
         Q = self.diagonalizer
-        g = self.space_covariance
+        g = self.spatial_covariance
         XX = X[:, :, :, np.newaxis] @ X[:, :, np.newaxis, :].conj()
 
         if self.partitioning:
@@ -548,7 +548,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
         
         X = self.input.transpose(1, 2, 0)
         Q = self.diagonalizer
-        g = self.space_covariance
+        g = self.spatial_covariance
 
         if self.partitioning:
             Z = self.latent # (n_sources, n_bases)
@@ -577,7 +577,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
 
         X = input.transpose(1, 2, 0)
         Q = self.diagonalizer # (n_bins, n_channels, n_channels)
-        g = self.space_covariance
+        g = self.spatial_covariance
 
         if self.partitioning:
             Z = self.latent # (n_sources, n_bases)
