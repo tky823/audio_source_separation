@@ -427,6 +427,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
                 raise ValueError("Not support normalization based on {}. Choose 'power'".format(self.normalize))
 
     def update_NMF(self):
+        eps = self.eps
         X = self.input.transpose(1, 2, 0)
         g = self.space_covariance
         Q = self.diagonalizer
@@ -442,6 +443,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
             # update W
             Lambda = W @ H
             R = np.sum(Lambda[..., np.newaxis] * g[:, :, np.newaxis], axis=0) # (n_bins, n_frames, n_channels)
+            R[R < eps] = eps
             xR = x_tilde / (R ** 2)
             gxR = np.sum(g[:, :, np.newaxis] * xR[np.newaxis], axis=3)
             gR = np.sum(g[:, :, np.newaxis] / R[np.newaxis], axis=3)
