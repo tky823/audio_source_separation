@@ -537,6 +537,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
     
     def compute_negative_loglikelihood(self):
         n_frames = self.n_frames
+        eps = self.eps
         
         X = self.input.transpose(1, 2, 0)
         Q = self.diagonalizer
@@ -555,6 +556,8 @@ class FastMultichannelISNMF(MultichannelNMFbase):
         QX = np.sum(Q[:, np.newaxis, :, :] * X[:, :, np.newaxis, :], axis=3) # (n_bins, n_channels, n_channels) (n_bins, n_frames, n_channels) -> (n_bins, n_frames, n_channels)
         x_tilde = np.abs(QX)**2 # (n_bins, n_frames, n_channels)
         detQQ = np.abs(np.linalg.det(Q @ Q.transpose(0, 2, 1))) # (n_bins,)
+
+        x_tilde, y_tilde = x_tilde + eps, y_tilde + eps
 
         loss = np.sum(x_tilde / y_tilde + np.log(y_tilde)) - n_frames * np.sum(np.log(detQQ))
 
