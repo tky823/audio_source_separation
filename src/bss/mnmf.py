@@ -513,6 +513,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
             Lambda = W @ H
 
         R = np.sum(Lambda[..., np.newaxis] * g[:, :, np.newaxis], axis=0)
+        R[R < eps] = eps
         E = np.eye(n_channels)
         E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_channels, n_channels)
 
