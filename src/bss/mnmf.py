@@ -455,6 +455,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
             # update H
             Lambda = W @ H
             R = np.sum(Lambda[...,np.newaxis] * g[:, :, np.newaxis], axis=0) # (n_bins, n_frames, n_channels)
+            R[R < eps] = eps
             xR = x_tilde / (R ** 2)
             gxR = np.sum(g[:, :, np.newaxis] * xR[np.newaxis], axis=3)
             gR = np.sum(g[:, :, np.newaxis] / R[np.newaxis], axis=3)
