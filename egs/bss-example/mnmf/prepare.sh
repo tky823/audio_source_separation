@@ -4,7 +4,7 @@ export PATH="./local:$PATH"
 
 data_root="data"
 titles="aew axb bdl"
-reverb=0.160
+reverb=0.360
 duration=0.5
 mic_intervals='3-3-3-8-3-3-3'
 distance=1
