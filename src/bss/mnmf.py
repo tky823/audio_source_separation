@@ -464,6 +464,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
             self.base, self.activation = W, H
     
     def update_SCM(self):
+        eps = self.eps
         g = self.space_covariance
         W, H = self.base, self.activation
         X = self.input.transpose(1, 2, 0)
@@ -482,6 +483,8 @@ class FastMultichannelISNMF(MultichannelNMFbase):
         R = np.sum(Lambda[..., np.newaxis] * g[:, :, np.newaxis], axis=0)
         QX = np.sum(Q[:, np.newaxis, :, :] * X[:, :, np.newaxis, :], axis=3) # (n_bins, n_channels, n_channels) (n_bins, n_frames, n_channels) -> (n_bins, n_frames, n_channels)
         x_tilde = np.abs(QX)**2
+
+        R[R < eps] = eps
         xR = x_tilde / (R ** 2)
         
         A = np.sum(Lambda[..., np.newaxis] * xR[np.newaxis], axis=2) # (n_sources, n_bins, n_frames, n_channels)
