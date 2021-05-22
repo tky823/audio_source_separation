@@ -385,7 +385,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
     
     def __repr__(self):
         s = "FastMNMF("
-        s += "n_bases={n_bases}, "
+        s += "n_bases={n_bases}"
         if hasattr(self, 'n_sources'):
             s += ", n_sources={n_sources}"
         if hasattr(self, 'n_channels'):
