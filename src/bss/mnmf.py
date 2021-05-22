@@ -568,6 +568,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
     
     def separate(self, input):
         reference_id = self.reference_id
+        eps = self.eps
 
         X = input.transpose(1, 2, 0)
         Q = self.diagonalizer # (n_bins, n_channels, n_channels)
@@ -586,6 +587,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
         y_tilde = np.sum(LambdaG, axis=0) # (n_bins, n_frames, n_channels)
         Q_inverse = np.linalg.inv(Q) # (n_bins, n_channels, n_channels)
         QX = np.sum(Q[:, np.newaxis, :] * X[:, :, np.newaxis], axis=3) # (n_bins, n_frames, n_channels)
+        y_tilde = y_tilde + eps
         QXLambdaGy = QX * (LambdaG / y_tilde) # (n_sources, n_bins, n_frames, n_channels)
         
         x_hat = np.sum(Q_inverse[:, np.newaxis, :, :] * QXLambdaGy[:, :, :, np.newaxis, :], axis=4) # (n_sources, n_bins, n_frames, n_channels)
