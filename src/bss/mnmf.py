@@ -305,7 +305,7 @@ class MultichanneltNMF(MultichannelNMFbase):
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class FastMultichannelISNMF(MultichannelNMFbase):
+class FastGaussMNMF(MultichannelNMFbase):
     """
     Reference: "Fast Multichannel Source Separation Based on Jointly Diagonalizable Spatial Covariance Matrices"
     """
@@ -682,7 +682,7 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
     if method == 'Gauss':
         mnmf = MultichannelISNMF(n_bases=n_bases)
     elif method == 'FastGauss':
-        mnmf = FastMultichannelISNMF(n_bases=n_bases)
+        mnmf = FastGaussMNMF(n_bases=n_bases)
     else:
         raise ValueError("Not support {}-MNMF.".format(method))
 
