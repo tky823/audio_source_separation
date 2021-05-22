@@ -346,7 +346,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
                 self.base = np.random.rand(n_sources, n_bins, n_bases)
             if not hasattr(self, 'activation'):
                 self.activation = np.random.rand(n_sources, n_bases, n_frames)
-        
+        # TODO: normalize Q
         self.diagonalizer = Q
         self.space_covariance = G
     
