@@ -1,0 +1,3 @@
+"""
+Non-negative tensor factorization
+"""
