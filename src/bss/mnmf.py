@@ -309,7 +309,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
     """
     Reference: "Fast Multichannel Source Separation Based on Jointly Diagonalizable Spatial Covariance Matrices"
     """
-    def __init__(self, n_bases=10, n_sources=None, partitioning=False, normalize='power', reference_id=0, callbacks=None, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_bases=10, n_sources=None, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         """
         Args:
         """
@@ -319,6 +319,7 @@ class FastMultichannelISNMF(MultichannelNMFbase):
         self.normalize = normalize
         self.reference_id = reference_id
 
+        self.recordable_loss = recordable_loss
         self.threshold = threshold
 
     def _reset(self, **kwargs):
@@ -360,14 +361,16 @@ class FastMultichannelISNMF(MultichannelNMFbase):
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()    
-        self.loss.append(loss)
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()    
+            self.loss.append(loss)
  
         for idx in range(iteration):
             self.update_once()
 
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
 
             if self.callbacks is not None:
                 for callback in self.callbacks:
