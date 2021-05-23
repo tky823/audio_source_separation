@@ -407,10 +407,11 @@ class FastGaussMNMF(MultichannelNMFbase):
         return s.format(**self.__dict__)
 
     def update_once(self):
+        eps = self.eps
+
         self.update_NMF()
         self.update_SCM()
         self.update_diagonalizer()
-        
         if self.normalize:
             # normalize
             if self.normalize == 'power':
@@ -423,14 +424,17 @@ class FastGaussMNMF(MultichannelNMFbase):
                 else:
                     QQ = Q * Q.conj()
                     QQsum = np.real(QQ.sum(axis=2).mean(axis=1)) # (n_bins,)
+                    QQsum[QQsum < eps] = eps
                     Q /= np.sqrt(QQsum)[:, np.newaxis, np.newaxis]
                     g /= QQsum[np.newaxis, :, np.newaxis] # (n_sources, n_bins, n_channels)
 
                     g_sum = g.sum(axis=2)
+                    g_sum[g_sum < eps] = eps
                     g /= g_sum[:, :, np.newaxis]
                     W *= g_sum[:, :, np.newaxis]
 
                     Wsum = W.sum(axis=1)
+                    Wsum[Wsum < eps] = eps
                     W /= Wsum[:, np.newaxis]
                     H *= Wsum[:, :, np.newaxis]
 
@@ -464,7 +468,8 @@ class FastGaussMNMF(MultichannelNMFbase):
 
             numerator = np.sum(H[:, np.newaxis, :, :] * gxR[:, :, np.newaxis], axis=3)
             denominator = np.sum(H[:, np.newaxis, :, :] * gR[:, :, np.newaxis], axis=3)
-            W *= np.sqrt(numerator / denominator)
+            denominator[denominator < eps] = eps
+            W = W * np.sqrt(numerator / denominator)
 
             # update H
             Lambda = W @ H
@@ -476,7 +481,8 @@ class FastGaussMNMF(MultichannelNMFbase):
 
             numerator = np.sum(W[:, :, :, np.newaxis] * gxR[:, :, np.newaxis], axis=1)
             denominator = np.sum(W[:, :, :, np.newaxis] * gR[:, :, np.newaxis], axis=1)
-            H *= np.sqrt(numerator / denominator)
+            denominator[denominator < eps] = eps
+            H = H * np.sqrt(numerator / denominator)
 
             self.base, self.activation = W, H
     
@@ -506,7 +512,8 @@ class FastGaussMNMF(MultichannelNMFbase):
         
         A = np.sum(Lambda[..., np.newaxis] * xR[np.newaxis], axis=2) # (n_sources, n_bins, n_frames, n_channels)
         B = np.sum(Lambda[..., np.newaxis] / R[np.newaxis], axis=2)
-        g *= np.sqrt(A / B)
+        B[B < eps] = eps
+        g = g * np.sqrt(A / B)
 
         self.spatial_covariance = g
     
@@ -602,7 +609,7 @@ class FastGaussMNMF(MultichannelNMFbase):
         y_tilde = np.sum(LambdaG, axis=0) # (n_bins, n_frames, n_channels)
         Q_inverse = np.linalg.inv(Q) # (n_bins, n_channels, n_channels)
         QX = np.sum(Q[:, np.newaxis, :] * X[:, :, np.newaxis], axis=3) # (n_bins, n_frames, n_channels)
-        y_tilde = y_tilde + eps
+        y_tilde[y_tilde < eps] = eps
         QXLambdaGy = QX * (LambdaG / y_tilde) # (n_sources, n_bins, n_frames, n_channels)
         
         x_hat = np.sum(Q_inverse[:, np.newaxis, :, :] * QXLambdaGy[:, :, :, np.newaxis, :], axis=4) # (n_sources, n_bins, n_frames, n_channels)
@@ -782,7 +789,6 @@ def _test_ilrma(partitioning=False):
     plt.ylabel('Loss')
     plt.savefig('data/MNMF/GaussILRMA/partitioning{}/loss.png'.format(int(partitioning)), bbox_inches='tight')
     plt.close()
-
 
 def _test_conv():
     sr = 16000
