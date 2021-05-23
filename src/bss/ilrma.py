@@ -197,7 +197,7 @@ class GaussILRMA(ILRMAbase):
         return output
 
     def __repr__(self) -> str:
-        s = "GaussILRMA("
+        s = "Gauss-ILRMA("
         s += "n_bases={n_bases}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
