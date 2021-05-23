@@ -41,7 +41,8 @@ class FDICAbase:
             W = np.eye(n_sources, n_channels, dtype=np.complex128)
             self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
         else:
-            W = self.demix_filter
+            W = self.demix_filter.copy()
+            self.demix_filter = W
         self.estimation = self.separate(X, demix_filter=W)
         
     def __call__(self, input, iteration=100, **kwargs):
