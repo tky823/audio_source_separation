@@ -17,6 +17,12 @@ class NMFbase:
 
         self.eps = eps
     
+    def __call__(self, *args, **kwargs):
+        self.update(*args, **kwargs)
+        T, V = self.base, self.activation
+
+        return T.copy(), V.copy()
+    
     def update(self, target, iteration=100):
         n_bases = self.n_bases
         eps = self.eps
@@ -56,6 +62,13 @@ class ComplexNMFbase:
 
         phase = np.angle(target)
         self.phase = np.tile(phase[:,np.newaxis,:], reps=(1, n_bases, 1))
+    
+    def __call__(self, *args, **kwargs):
+        self.update(*args, **kwargs)
+        T, V = self.base, self.activation
+        Phi = self.phase
+
+        return T.copy(), V.copy(), Phi.copy()
     
     def update(self, target, iteration=100):
         n_bases = self.n_bases
@@ -681,11 +694,11 @@ def _test(metric='EUC', algorithm='mm'):
     else:
         raise NotImplementedError("Not support {}-NMF".format(metric))
 
-    nmf.update(power, iteration=iteration)
+    base, activation = nmf(power, iteration=iteration)
 
     amplitude[amplitude < EPS] = EPS
 
-    estimated_power = (nmf.base @ nmf.activation)**(2 / domain)
+    estimated_power = (base @ activation)**(2 / domain)
     estimated_amplitude = np.sqrt(estimated_power)
     ratio = estimated_amplitude / amplitude
     estimated_spectrogram = ratio * spectrogram
@@ -704,7 +717,7 @@ def _test(metric='EUC', algorithm='mm'):
     plt.close()
 
     for idx in range(n_bases):
-        estimated_power = (nmf.base[:, idx: idx+1] @ nmf.activation[idx: idx+1, :])**(2 / domain)
+        estimated_power = (base[:, idx: idx+1] @ activation[idx: idx+1, :])**(2 / domain)
         estimated_amplitude = np.sqrt(estimated_power)
         ratio = estimated_amplitude / amplitude
         estimated_spectrogram = ratio * spectrogram
@@ -748,9 +761,9 @@ def _test_cnmf(metric='EUC'):
     else:
         raise NotImplementedError("Not support {}-NMF".format(metric))
     
-    nmf.update(spectrogram, iteration=iteration)
+    base, activation, phase = nmf(spectrogram, iteration=iteration)
 
-    estimated_spectrogram = nmf.base[:,:,np.newaxis] * nmf.activation[np.newaxis,:,:] * np.exp(1j*nmf.phase)
+    estimated_spectrogram = base[:,:,np.newaxis] * activation[np.newaxis,:,:] * np.exp(1j*phase)
     estimated_spectrogram = estimated_spectrogram.sum(axis=1)
     estimated_signal = istft(estimated_spectrogram, fft_size=fft_size, hop_size=hop_size, length=T)
     estimated_signal = estimated_signal / np.abs(estimated_signal).max()
@@ -767,7 +780,7 @@ def _test_cnmf(metric='EUC'):
     plt.close()
 
     for idx in range(n_bases):
-        estimated_spectrogram = nmf.base[:, idx: idx + 1] * nmf.activation[idx: idx + 1, :] * nmf.phase[:, idx, :]
+        estimated_spectrogram = base[:, idx: idx + 1] * activation[idx: idx + 1, :] * phase[:, idx, :]
 
         estimated_signal = istft(estimated_spectrogram, fft_size=fft_size, hop_size=hop_size, length=T)
         estimated_signal = estimated_signal / np.abs(estimated_signal).max()
@@ -796,7 +809,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     
     from utils.utils_audio import read_wav, write_wav
-    from algorithm.stft import stft, istft
+    from transform.stft import stft, istft
 
     plt.rcParams['figure.dpi'] = 200
 

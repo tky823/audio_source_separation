@@ -337,15 +337,25 @@ class FastGaussMNMF(MultichannelNMFbase):
         if self.partitioning:
             if not hasattr(self, 'latent'):
                 self.latent = np.ones((n_sources, n_bases), dtype=np.float64) / n_sources
+            else:
+                self.latent = self.latent.copy()
             if not hasattr(self, 'base'):
                 self.base = np.random.rand(n_bins, n_bases)
+            else:
+                self.base = self.base.copy()
             if not hasattr(self, 'activation'):
                 self.activation = np.random.rand(n_bases, n_frames)
+            else:
+                self.activation = self.activation.copy()
         else:
             if not hasattr(self, 'base'):
                 self.base = np.random.rand(n_sources, n_bins, n_bases)
+            else:
+                self.base = self.base.copy()
             if not hasattr(self, 'activation'):
                 self.activation = np.random.rand(n_sources, n_bases, n_frames)
+            else:
+                self.activation = self.activation.copy()
         # TODO: normalize Q
         self.diagonalizer = Q
         self.spatial_covariance = G
