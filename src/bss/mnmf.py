@@ -287,7 +287,7 @@ class MultichannelISNMF(MultichannelNMFbase):
         loss = loss.sum()
         return loss
 
-class MultichanneltNMF(MultichannelNMFbase):
+class tMNMF(MultichannelNMFbase):
     """
     Reference: "Student's t multichannel nonnegative matrix factorization for blind source separation"
     See https://ieeexplore.ieee.org/document/7602889
@@ -305,7 +305,7 @@ class MultichanneltNMF(MultichannelNMFbase):
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class FastMultichannelISNMF(MultichannelNMFbase):
+class FastGaussMNMF(MultichannelNMFbase):
     """
     Reference: "Fast Multichannel Source Separation Based on Jointly Diagonalizable Spatial Covariance Matrices"
     """
@@ -337,15 +337,25 @@ class FastMultichannelISNMF(MultichannelNMFbase):
         if self.partitioning:
             if not hasattr(self, 'latent'):
                 self.latent = np.ones((n_sources, n_bases), dtype=np.float64) / n_sources
+            else:
+                self.latent = self.latent.copy()
             if not hasattr(self, 'base'):
                 self.base = np.random.rand(n_bins, n_bases)
+            else:
+                self.base = self.base.copy()
             if not hasattr(self, 'activation'):
                 self.activation = np.random.rand(n_bases, n_frames)
+            else:
+                self.activation = self.activation.copy()
         else:
             if not hasattr(self, 'base'):
                 self.base = np.random.rand(n_sources, n_bins, n_bases)
+            else:
+                self.base = self.base.copy()
             if not hasattr(self, 'activation'):
                 self.activation = np.random.rand(n_sources, n_bases, n_frames)
+            else:
+                self.activation = self.activation.copy()
         # TODO: normalize Q
         self.diagonalizer = Q
         self.spatial_covariance = G
@@ -682,7 +692,7 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
     if method == 'Gauss':
         mnmf = MultichannelISNMF(n_bases=n_bases)
     elif method == 'FastGauss':
-        mnmf = FastMultichannelISNMF(n_bases=n_bases)
+        mnmf = FastGaussMNMF(n_bases=n_bases)
     else:
         raise ValueError("Not support {}-MNMF.".format(method))
 

@@ -43,7 +43,8 @@ class IVAbase:
             W = np.eye(n_sources, n_channels, dtype=np.complex128)
             self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
         else:
-            W = self.demix_filter
+            W = self.demix_filter.copy()
+            self.demix_filter = W
         self.estimation = self.separate(X, demix_filter=W)
         
     def __call__(self, input, iteration=100, **kwargs):
@@ -60,6 +61,10 @@ class IVAbase:
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+        
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -67,7 +72,7 @@ class IVAbase:
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
-
+            
             if self.callbacks is not None:
                 for callback in self.callbacks:
                     callback(self)
@@ -136,6 +141,10 @@ class GradIVAbase(IVAbase):
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+        
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -143,7 +152,7 @@ class GradIVAbase(IVAbase):
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
-
+            
             if self.callbacks is not None:
                 for callback in self.callbacks:
                     callback(self)
@@ -297,6 +306,10 @@ class AuxIVAbase(IVAbase):
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+        
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -350,6 +363,16 @@ class AuxLaplaceIVA(AuxIVAbase):
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+        
+        if self.callbacks is not None:
+            if self.algorithm_spatial == 'ISS':
+                # In `update_once()`, demix_filter isn't updated
+                # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+                X, Y = self.input, self.estimation
+                self.demix_filter = self.compute_demix_filter(Y, X)
+            
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -473,6 +496,16 @@ class AuxGaussIVA(AuxIVAbase):
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+        
+        if self.callbacks is not None:
+            if self.algorithm_spatial == 'ISS':
+                # In `update_once()`, demix_filter isn't updated
+                # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+                X, Y = self.input, self.estimation
+                self.demix_filter = self.compute_demix_filter(Y, X)
+            
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
