@@ -287,7 +287,7 @@ class MultichannelISNMF(MultichannelNMFbase):
         loss = loss.sum()
         return loss
 
-class MultichanneltNMF(MultichannelNMFbase):
+class tMNMF(MultichannelNMFbase):
     """
     Reference: "Student's t multichannel nonnegative matrix factorization for blind source separation"
     See https://ieeexplore.ieee.org/document/7602889
