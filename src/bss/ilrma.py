@@ -80,6 +80,10 @@ class ILRMAbase:
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
 
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
+
         for idx in range(iteration):
             self.update_once()
 
@@ -156,6 +160,10 @@ class GaussILRMA(ILRMAbase):
 
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
+
+        if self.callbacks is not None:
+                for callback in self.callbacks:
+                    callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -410,6 +418,10 @@ class tILRMA(ILRMAbase):
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
 
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
+
         for idx in range(iteration):
             self.update_once()
 
@@ -645,6 +657,10 @@ class KLILRMA(ILRMAbase):
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
 
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
+
         for idx in range(iteration):
             self.update_once()
 
@@ -715,6 +731,10 @@ class ConsistentGaussILRMA(GaussILRMA):
 
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
+
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
