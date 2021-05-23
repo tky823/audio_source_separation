@@ -58,6 +58,10 @@ class FDICAbase:
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+        
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -65,7 +69,7 @@ class FDICAbase:
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
-
+            
             if self.callbacks is not None:
                 for callback in self.callbacks:
                     callback(self)
@@ -158,6 +162,9 @@ class GradFDICAbase(FDICAbase):
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -165,7 +172,7 @@ class GradFDICAbase(FDICAbase):
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
-
+            
             if self.callbacks is not None:
                 for callback in self.callbacks:
                     callback(self)

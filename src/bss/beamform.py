@@ -248,3 +248,8 @@ if __name__ == '__main__':
 
     _test('DSBF')
     _test('MVDR')
+
+elif __name__ == 'bss.beamform':
+    import warnings
+
+    warnings.warn("in progress", UserWarning)
