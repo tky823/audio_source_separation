@@ -397,6 +397,37 @@ class GaussILRMA(ILRMAbase):
 
         return loss
 
+class GGDILRMA(ILRMAbase):
+    """
+    Reference: "Generalized independent low-rank matrix analysis using heavy-tailed distributions for blind source separation"
+    See: https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-018-0549-5
+    """
+    def __init__(self, n_bases=10, beta=1, domain=2, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        """
+        Args:
+            beta: shape parameter. beta = 1: Laplace distribution, beta = 2: Gaussian distribution.
+            normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
+            threshold <float>: threshold for condition number when computing (WU)^{-1}.
+        """
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+
+        self.beta = beta
+        self.domain = domain
+        self.reference_id = reference_id
+
+        raise NotImplementedError("Implement GGD-ILRMA")
+    
+    def __repr__(self) -> str:
+        s = "GGD-ILRMA("
+        s += "n_bases={n_bases}"
+        s += ", beta={beta}"
+        s += ", domain={domain}"
+        s += ", partitioning={partitioning}"
+        s += ", normalize={normalize}"
+        s += ")"
+
+        return s.format(**self.__dict__)
+
 class tILRMA(ILRMAbase):
     """
     Reference: "Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation"
@@ -454,7 +485,7 @@ class tILRMA(ILRMAbase):
         return output
     
     def __repr__(self) -> str:
-        s = "tILRMA("
+        s = "t-ILRMA("
         s += "n_bases={n_bases}"
         s += ", nu={nu}"
         s += ", domain={domain}"
@@ -691,6 +722,16 @@ class KLILRMA(ILRMAbase):
         self.estimation = output
 
         return output
+    
+    def __repr__(self) -> str:
+        s = "KL-ILRMA("
+        s += "n_bases={n_bases}"
+        s += ", domain={domain}"
+        s += ", partitioning={partitioning}"
+        s += ", normalize={normalize}"
+        s += ")"
+
+        return s.format(**self.__dict__)
 
 class RegularizedILRMA(ILRMAbase):
     """
@@ -768,7 +809,7 @@ class ConsistentGaussILRMA(GaussILRMA):
         return output
     
     def __repr__(self) -> str:
-        s = "ConsistentGaussILRMA("
+        s = "Consistent-GaussILRMA("
         s += "n_bases={n_bases}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
