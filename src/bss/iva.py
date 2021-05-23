@@ -6,7 +6,7 @@ from algorithm.projection_back import projection_back
 
 EPS=1e-12
 THRESHOLD=1e+12
-__algorithms_spatial__ = ['IP', 'ISS']
+__algorithms_spatial__ = ['IP', 'ISS', 'IPA']
 
 class IVAbase:
     def __init__(self, callbacks=None, recordable_loss=True, eps=EPS):
@@ -282,6 +282,13 @@ class NaturalGradLaplaceIVA(GradIVAbase):
 
 
 class AuxIVAbase(IVAbase):
+    """
+    References:
+        "Stable and Fast Update Rules for Independent Vector Analysis Based on Auxiliary Function Technique"
+        "Auxiliary-function-based Independent Vector Analysis with Power of Vector-norm Type Weighting Functions"
+        "Fast and Stable Blind Source Separation with Rank-1 Updates"
+        "Independent Vector Analysis via Log-Quadratically Penalized Quadratic Minimization"
+    """
     def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
@@ -464,6 +471,8 @@ class AuxLaplaceIVA(AuxIVAbase):
                 # In `update_once()`, demix_filter isn't updated ordinally
                 # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                 self.demix_filter = self.compute_demix_filter(Y, X)
+        elif self.algorithm_spatial == 'IPA':
+            raise ValueError("in progress...")
         else:
             raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
         
@@ -856,12 +865,15 @@ if __name__ == '__main__':
     """
 
     _test_conv()
+
     print("="*10, "GradLaplaceIVA", "="*10)
     _test(method='GradLaplaceIVA')
     print()
+
     print("="*10, "NaturalGradLaplaceIVA", "="*10)
     _test(method='NaturalGradLaplaceIVA')
     print()
+    
     print("="*10, "AuxIVA-IP", "="*10)
     print("-"*10, "AuxLaplaceIVA-IP", "-"*10)
     _test(method='AuxLaplaceIVA-IP')
@@ -869,6 +881,7 @@ if __name__ == '__main__':
     print("-"*10, "AuxGaussIVA-IP", "-"*10)
     _test(method='AuxGaussIVA-IP')
     print()
+
     print("="*10, "AuxIVA-ISS", "="*10)
     print("-"*10, "AuxLaplaceIVA-ISS", "-"*10)
     _test(method='AuxLaplaceIVA-ISS')
@@ -876,6 +889,17 @@ if __name__ == '__main__':
     print("-"*10, "AuxGaussIVA-ISS", "-"*10)
     _test(method='AuxGaussIVA-ISS')
     print()
+
+    """
+    print("="*10, "AuxIVA-IPA", "="*10)
+    print("-"*10, "AuxLaplaceIVA-IPA", "-"*10)
+    _test(method='AuxLaplaceIVA-IPA')
+    print()
+    print("-"*10, "AuxGaussIVA-IPA", "-"*10)
+    _test(method='AuxGaussIVA-IPA')
+    print()
+    """
+
     print("="*10, "ProxIVA", "="*10)
     print("-"*10, "ProxLaplaceIVA", "-"*10)
     _test(method='ProxLaplaceIVA')
