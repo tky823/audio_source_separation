@@ -635,6 +635,14 @@ class SparseAuxIVA(AuxIVAbase):
     def update_once(self):
         raise NotImplementedError("in progress...")
 
+class OverIVAbase(AuxIVAbase):
+    def __init__(self, algorithm_spatial, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+
+    def __call__(self, input, iteration=100, **kwargs):
+
+        return super().__call__(input, iteration=iteration, **kwargs)
+
 class ProxLaplaceIVA(PDSBSSbase):
     def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
@@ -865,6 +873,62 @@ def _test_grad_iva(method='GradLaplaceIVA'):
     plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
 
+def _test_over_iva(method='ProxLaplaceIVA'):
+    from transform.pca import pca
+
+    np.random.seed(111)
+    
+    # Room impulse response
+    sr = 16000
+    reverb = 0.16
+    duration = 0.5
+    samples = int(duration * sr)
+    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
+    mic_indices = [2, 5]
+    degrees = [60, 300]
+    titles = ['man-16000', 'woman-16000']
+
+    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
+    
+    n_channels, T = mixed_signal.shape
+    n_sources = 2
+    
+    # STFT
+    fft_size, hop_size = 2048, 1024
+    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
+
+    # IVA
+    n_sources = len(titles)
+    iteration = 200
+
+    if method == 'PCAIVA':
+        mixture_pca = pca(mixture)
+
+        iva = AuxLaplaceIVA(algorithm_spatial='IP')
+        iteration = 50
+
+        estimation = iva(mixture_pca, iteration=iteration)
+    elif method == 'OverIVA':
+        raise ValueError("Not support method {}".format(method))
+    else:
+        raise ValueError("Not support method {}".format(method))
+
+    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
+    
+    print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
+
+    for idx in range(n_sources):
+        _estimated_signal = estimated_signal[idx]
+        write_wav("data/IVA/{}/mixture-{}_estimated-iter{}-{}.wav".format(method, sr, iteration, idx), signal=_estimated_signal, sr=sr)
+
+    plt.figure()
+    plt.plot(iva.loss, color='black')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
+    plt.close()
+
+
 def _test_prox_iva(method='ProxLaplaceIVA'):
     np.random.seed(111)
     
@@ -948,6 +1012,8 @@ if __name__ == '__main__':
     os.makedirs("data/IVA/AuxGaussIVA-IP", exist_ok=True)
     os.makedirs("data/IVA/AuxLaplaceIVA-ISS", exist_ok=True)
     os.makedirs("data/IVA/AuxGaussIVA-ISS", exist_ok=True)
+    os.makedirs("data/IVA/PCAIVA", exist_ok=True)
+    os.makedirs("data/IVA/OverIVA", exist_ok=True)
     os.makedirs("data/IVA/ProxLaplaceIVA", exist_ok=True)
 
     """
@@ -990,6 +1056,14 @@ if __name__ == '__main__':
     _test_aux_iva(method='AuxGaussIVA-IPA')
     print()
     """
+
+    print("-"*10, "PCAIVA", "-"*10)
+    _test_over_iva(method='PCAIVA')
+    print()
+
+    print("-"*10, "OverIVA", "-"*10)
+    _test_over_iva(method='OverIVA')
+    print()
 
     print("="*10, "ProxIVA", "="*10)
     print("-"*10, "ProxLaplaceIVA", "-"*10)
