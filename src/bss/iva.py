@@ -755,7 +755,64 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
     return mixed_signals
 
-def _test(method='AuxLaplaceIVA'):
+def _test_aux_iva(method='AuxLaplaceIVA'):
+    np.random.seed(111)
+    
+    # Room impulse response
+    sr = 16000
+    reverb = 0.16
+    duration = 0.5
+    samples = int(duration * sr)
+    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
+    mic_indices = [2, 5]
+    degrees = [60, 300]
+    titles = ['man-16000', 'woman-16000']
+
+    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
+    
+    n_channels, T = mixed_signal.shape
+    
+    # STFT
+    fft_size, hop_size = 2048, 1024
+    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
+
+    # IVA
+    n_sources = len(titles)
+    iteration = 200
+
+    if method == 'AuxLaplaceIVA-IP':
+        iva = AuxLaplaceIVA(algorithm_spatial='IP')
+        iteration = 50
+    elif method == 'AuxGaussIVA-IP':
+        iva = AuxGaussIVA(algorithm_spatial='IP')
+        iteration = 50
+    elif method == 'AuxLaplaceIVA-ISS':
+        iva = AuxLaplaceIVA(algorithm_spatial='ISS')
+        iteration = 100
+    elif method == 'AuxGaussIVA-ISS':
+        iva = AuxGaussIVA(algorithm_spatial='ISS')
+        iteration = 100
+    else:
+        raise ValueError("Not support method {}".format(method))
+
+    estimation = iva(mixture, iteration=iteration)
+
+    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
+    
+    print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
+
+    for idx in range(n_sources):
+        _estimated_signal = estimated_signal[idx]
+        write_wav("data/IVA/{}/mixture-{}_estimated-iter{}-{}.wav".format(method, sr, iteration, idx), signal=_estimated_signal, sr=sr)
+
+    plt.figure()
+    plt.plot(iva.loss, color='black')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
+    plt.close()
+
+def _test_grad_iva(method='GradLaplaceIVA'):
     np.random.seed(111)
     
     # Room impulse response
@@ -788,19 +845,52 @@ def _test(method='AuxLaplaceIVA'):
         lr = 0.1
         iva = NaturalGradLaplaceIVA(lr=lr)
         iteration = 200
-    elif method == 'AuxLaplaceIVA-IP':
-        iva = AuxLaplaceIVA(algorithm_spatial='IP')
-        iteration = 50
-    elif method == 'AuxGaussIVA-IP':
-        iva = AuxGaussIVA(algorithm_spatial='IP')
-        iteration = 50
-    elif method == 'AuxLaplaceIVA-ISS':
-        iva = AuxLaplaceIVA(algorithm_spatial='ISS')
-        iteration = 100
-    elif method == 'AuxGaussIVA-ISS':
-        iva = AuxGaussIVA(algorithm_spatial='ISS')
-        iteration = 100
-    elif method == 'ProxLaplaceIVA':
+    else:
+        raise ValueError("Not support method {}".format(method))
+
+    estimation = iva(mixture, iteration=iteration)
+
+    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
+    
+    print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
+
+    for idx in range(n_sources):
+        _estimated_signal = estimated_signal[idx]
+        write_wav("data/IVA/{}/mixture-{}_estimated-iter{}-{}.wav".format(method, sr, iteration, idx), signal=_estimated_signal, sr=sr)
+
+    plt.figure()
+    plt.plot(iva.loss, color='black')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
+    plt.close()
+
+def _test_prox_iva(method='ProxLaplaceIVA'):
+    np.random.seed(111)
+    
+    # Room impulse response
+    sr = 16000
+    reverb = 0.16
+    duration = 0.5
+    samples = int(duration * sr)
+    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
+    mic_indices = [2, 5]
+    degrees = [60, 300]
+    titles = ['man-16000', 'woman-16000']
+
+    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
+    
+    n_channels, T = mixed_signal.shape
+    
+    # STFT
+    fft_size, hop_size = 2048, 1024
+    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
+
+    # IVA
+    n_sources = len(titles)
+    iteration = 200
+
+    if method == 'ProxLaplaceIVA':
         step = 1.75
         iva = ProxLaplaceIVA(step=step)
         iteration = 100
@@ -823,6 +913,7 @@ def _test(method='AuxLaplaceIVA'):
     plt.ylabel('Loss')
     plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
+
 
 def _test_conv():
     sr = 16000
@@ -867,39 +958,39 @@ if __name__ == '__main__':
     _test_conv()
 
     print("="*10, "GradLaplaceIVA", "="*10)
-    _test(method='GradLaplaceIVA')
+    _test_grad_iva(method='GradLaplaceIVA')
     print()
 
     print("="*10, "NaturalGradLaplaceIVA", "="*10)
-    _test(method='NaturalGradLaplaceIVA')
+    _test_grad_iva(method='NaturalGradLaplaceIVA')
     print()
     
     print("="*10, "AuxIVA-IP", "="*10)
     print("-"*10, "AuxLaplaceIVA-IP", "-"*10)
-    _test(method='AuxLaplaceIVA-IP')
+    _test_aux_iva(method='AuxLaplaceIVA-IP')
     print()
     print("-"*10, "AuxGaussIVA-IP", "-"*10)
-    _test(method='AuxGaussIVA-IP')
+    _test_aux_iva(method='AuxGaussIVA-IP')
     print()
 
     print("="*10, "AuxIVA-ISS", "="*10)
     print("-"*10, "AuxLaplaceIVA-ISS", "-"*10)
-    _test(method='AuxLaplaceIVA-ISS')
+    _test_aux_iva(method='AuxLaplaceIVA-ISS')
     print()
     print("-"*10, "AuxGaussIVA-ISS", "-"*10)
-    _test(method='AuxGaussIVA-ISS')
+    _test_aux_iva(method='AuxGaussIVA-ISS')
     print()
 
     """
     print("="*10, "AuxIVA-IPA", "="*10)
     print("-"*10, "AuxLaplaceIVA-IPA", "-"*10)
-    _test(method='AuxLaplaceIVA-IPA')
+    _test_aux_iva(method='AuxLaplaceIVA-IPA')
     print()
     print("-"*10, "AuxGaussIVA-IPA", "-"*10)
-    _test(method='AuxGaussIVA-IPA')
+    _test_aux_iva(method='AuxGaussIVA-IPA')
     print()
     """
 
     print("="*10, "ProxIVA", "="*10)
     print("-"*10, "ProxLaplaceIVA", "-"*10)
-    _test(method='ProxLaplaceIVA')
+    _test_prox_iva(method='ProxLaplaceIVA')
