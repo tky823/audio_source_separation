@@ -121,11 +121,12 @@ class GradIVAbase(IVAbase):
     Reference: "Independent Vector Analysis: Definition and Algorithms"
     See https://ieeexplore.ieee.org/document/4176796
     """
-    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
         super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.lr = lr
         self.reference_id = reference_id
+        self.apply_projection_back = apply_projection_back
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -159,10 +160,11 @@ class GradIVAbase(IVAbase):
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        output = self.separate(X, demix_filter=W)
 
-        scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        if self.apply_projection_back:
+            scale = projection_back(output, reference=X[reference_id])
+            output = output * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
@@ -181,11 +183,8 @@ class GradIVAbase(IVAbase):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
 
 class GradLaplaceIVA(GradIVAbase):
-    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
-        super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
-
-        self.lr = lr
-        self.reference_id = reference_id
+    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
+        super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps)
     
     def __repr__(self) -> str:
         s = "NaturalGradIVA("
@@ -232,11 +231,8 @@ class GradLaplaceIVA(GradIVAbase):
 
 
 class NaturalGradLaplaceIVA(GradIVAbase):
-    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
-        super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
-
-        self.lr = lr
-        self.reference_id = reference_id
+    def __init__(self, lr=1e-1, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
+        super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps)
     
     def __repr__(self) -> str:
         s = "NaturalGradLaplaceIVA("
@@ -289,11 +285,12 @@ class AuxIVAbase(IVAbase):
         "Fast and Stable Blind Source Separation with Rank-1 Updates"
         "Independent Vector Analysis via Log-Quadratically Penalized Quadratic Minimization"
     """
-    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.algorithm_spatial = algorithm_spatial
         self.reference_id = reference_id
+        self.apply_projection_back = apply_projection_back
         self.threshold = threshold
 
         if not self.algorithm_spatial in __algorithms_spatial__:
@@ -330,10 +327,12 @@ class AuxIVAbase(IVAbase):
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        output = self.separate(X, demix_filter=W)
 
-        scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        if self.apply_projection_back:
+            scale = projection_back(output, reference=X[reference_id])
+            output = output * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        
         self.estimation = output
 
         return output
@@ -353,9 +352,9 @@ class AuxIVAbase(IVAbase):
 
 
 class AuxLaplaceIVA(AuxIVAbase):
-    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
-        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
-    
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+
     def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
@@ -400,10 +399,12 @@ class AuxLaplaceIVA(AuxIVAbase):
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        output = self.separate(X, demix_filter=W)
 
-        scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        if self.apply_projection_back:
+            scale = projection_back(output, reference=X[reference_id])
+            output = output * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        
         self.estimation = output
 
         return output
@@ -488,8 +489,8 @@ class AuxLaplaceIVA(AuxIVAbase):
         return loss
 
 class AuxGaussIVA(AuxIVAbase):
-    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
-        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -535,10 +536,12 @@ class AuxGaussIVA(AuxIVAbase):
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        output = self.separate(X, demix_filter=W)
 
-        scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        if self.apply_projection_back:
+            scale = projection_back(output, reference=X[reference_id])
+            output = output * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        
         self.estimation = output
 
         return output
@@ -627,8 +630,8 @@ class SparseAuxIVA(AuxIVAbase):
     Reference: "A computationally cheaper method for blind speech separation based on AuxIVA and incomplete demixing transform"
     See https://ieeexplore.ieee.org/document/7602921
     """
-    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
-        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
 
         raise NotImplementedError("in progress")
     
@@ -636,18 +639,19 @@ class SparseAuxIVA(AuxIVAbase):
         raise NotImplementedError("in progress...")
 
 class OverIVAbase(AuxIVAbase):
-    def __init__(self, algorithm_spatial, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
-        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+    def __init__(self, algorithm_spatial, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
 
     def __call__(self, input, iteration=100, **kwargs):
 
         return super().__call__(input, iteration=iteration, **kwargs)
 
 class ProxLaplaceIVA(PDSBSSbase):
-    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
         super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
+        self.apply_projection_back = apply_projection_back
     
     def __call__(self, input, iteration, **kwargs):
         """
@@ -661,10 +665,12 @@ class ProxLaplaceIVA(PDSBSSbase):
 
         reference_id = self.reference_id
         X, W = input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        output = self.separate(X, demix_filter=W)
 
-        scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        if self.apply_projection_back:
+            scale = projection_back(output, reference=X[reference_id])
+            output = output * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        
         self.estimation = output
 
         return output
@@ -720,8 +726,8 @@ class SparseProxIVA(PDSBSSbase):
     Reference: "Time-frequency-masking-based Determined BSS with Application to Sparse IVA"
     See https://ieeexplore.ieee.org/document/8682217
     """
-    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
-        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+    def __init__(self, regularizer=1, step_prox_logdet=1e+0, step_prox_penalty=1e+0, step=1e+0, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
+        super().__init__(regularizer=regularizer, step_prox_logdet=step_prox_logdet, step_prox_penalty=step_prox_penalty, step=step, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
 
@@ -875,6 +881,7 @@ def _test_grad_iva(method='GradLaplaceIVA'):
 
 def _test_over_iva(method='ProxLaplaceIVA'):
     from transform.pca import pca
+    from algorithm.projection_back import projection_back
 
     np.random.seed(111)
     
@@ -884,30 +891,33 @@ def _test_over_iva(method='ProxLaplaceIVA'):
     duration = 0.5
     samples = int(duration * sr)
     mic_intervals = [8, 8, 8, 8, 8, 8, 8]
-    mic_indices = [2, 5]
+    mic_indices = [2, 4, 5]
     degrees = [60, 300]
-    titles = ['man-16000', 'woman-16000']
+    titles = ['sample-song/sample3_source2', 'sample-song/sample3_source3']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
     
     n_channels, T = mixed_signal.shape
-    n_sources = 2
     
     # STFT
     fft_size, hop_size = 2048, 1024
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
 
     # IVA
-    n_sources = len(titles)
+    n_sources = 2 # Overdetermined
     iteration = 200
 
-    if method == 'PCAIVA':
-        mixture_pca = pca(mixture)
+    if method == 'PCA+IVA':
+        reference_id = 0
+        mixture_pca = pca(mixture)[:n_sources]
 
-        iva = AuxLaplaceIVA(algorithm_spatial='IP')
+        iva = AuxLaplaceIVA(algorithm_spatial='IP', apply_projection_back=False)
         iteration = 50
 
         estimation = iva(mixture_pca, iteration=iteration)
+
+        scale = projection_back(estimation, mixture[reference_id])
+        estimation = estimation * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
     elif method == 'OverIVA':
         raise ValueError("Not support method {}".format(method))
     else:
@@ -1012,7 +1022,7 @@ if __name__ == '__main__':
     os.makedirs("data/IVA/AuxGaussIVA-IP", exist_ok=True)
     os.makedirs("data/IVA/AuxLaplaceIVA-ISS", exist_ok=True)
     os.makedirs("data/IVA/AuxGaussIVA-ISS", exist_ok=True)
-    os.makedirs("data/IVA/PCAIVA", exist_ok=True)
+    os.makedirs("data/IVA/PCA+IVA", exist_ok=True)
     os.makedirs("data/IVA/OverIVA", exist_ok=True)
     os.makedirs("data/IVA/ProxLaplaceIVA", exist_ok=True)
 
@@ -1056,15 +1066,15 @@ if __name__ == '__main__':
     _test_aux_iva(method='AuxGaussIVA-IPA')
     print()
     """
-
-    print("-"*10, "PCAIVA", "-"*10)
-    _test_over_iva(method='PCAIVA')
+    
+    print("-"*10, "PCA+IVA", "-"*10)
+    _test_over_iva(method='PCA+IVA')
     print()
 
     print("-"*10, "OverIVA", "-"*10)
     _test_over_iva(method='OverIVA')
     print()
-
+    
     print("="*10, "ProxIVA", "="*10)
     print("-"*10, "ProxLaplaceIVA", "-"*10)
     _test_prox_iva(method='ProxLaplaceIVA')
