@@ -284,6 +284,7 @@ class AuxIVAbase(IVAbase):
         "Auxiliary-function-based Independent Vector Analysis with Power of Vector-norm Type Weighting Functions"
         "Fast and Stable Blind Source Separation with Rank-1 Updates"
         "Independent Vector Analysis via Log-Quadratically Penalized Quadratic Minimization"
+        "Independent Vector Analysis with more Microphones than Sources"
     """
     def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
