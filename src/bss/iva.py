@@ -639,9 +639,15 @@ class SparseAuxIVA(AuxIVAbase):
     def update_once(self):
         raise NotImplementedError("in progress...")
 
-class OverIVAbase(AuxIVAbase):
-    def __init__(self, algorithm_spatial, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+class OverAuxIVAbase(AuxIVAbase):
+    def __init__(self, algorithm_spatial, n_sources=None, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+
+        self.n_sources = n_sources
+
+class OverAuxLaplaceIVA(OverAuxIVAbase):
+    def __init__(self, algorithm_spatial, n_sources=None, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, n_sources=n_sources, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
 
     def __call__(self, input, iteration=100, **kwargs):
 
@@ -880,7 +886,7 @@ def _test_grad_iva(method='GradLaplaceIVA'):
     plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
 
-def _test_over_iva(method='ProxLaplaceIVA'):
+def _test_over_iva(method='OverAuxLaplaceIVA'):
     from transform.pca import pca
     from algorithm.projection_back import projection_back
 
@@ -919,7 +925,7 @@ def _test_over_iva(method='ProxLaplaceIVA'):
 
         scale = projection_back(estimation, mixture[reference_id])
         estimation = estimation * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
-    elif method == 'OverIVA':
+    elif method == 'OverAuxLaplaceIVA':
         raise ValueError("Not support method {}".format(method))
     else:
         raise ValueError("Not support method {}".format(method))
