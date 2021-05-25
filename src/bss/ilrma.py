@@ -241,11 +241,12 @@ class GaussILRMA(ILRMAbase):
             elif self.normalize == 'projection-back':
                 if self.partitioning:
                     raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
+                domain = self.domain
                 scale = projection_back(Y, reference=X[self.reference_id])
                 Y = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
                 transposed_scale = scale.transpose(1,0) # (n_sources, n_bins) -> (n_bins, n_sources)
                 W = W * transposed_scale[...,np.newaxis] # (n_bins, n_sources, n_channels)
-                T = T * np.abs(scale[...,np.newaxis])**2
+                T = T * np.abs(scale[...,np.newaxis])**domain
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
 
