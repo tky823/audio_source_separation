@@ -207,6 +207,7 @@ class GaussILRMA(ILRMAbase):
         return s.format(**self.__dict__)
 
     def update_once(self):
+        domain = self.domain
         eps = self.eps
 
         self.update_source_model()
@@ -231,17 +232,16 @@ class GaussILRMA(ILRMAbase):
                 if self.partitioning:
                     Z = self.latent
                     
-                    Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
+                    Zaux = Z / (aux[:,np.newaxis]**domain) # (n_sources, n_bases)
                     Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
                     T = T * Zauxsum # (n_bins, n_bases)
                     Z = Zaux / Zauxsum # (n_sources, n_bases)
                     self.latent = Z
                 else:
-                    T = T / (aux[:,np.newaxis,np.newaxis]**2)
+                    T = T / (aux[:,np.newaxis,np.newaxis]**domain)
             elif self.normalize == 'projection-back':
                 if self.partitioning:
                     raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
-                domain = self.domain
                 scale = projection_back(Y, reference=X[self.reference_id])
                 Y = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
                 transposed_scale = scale.transpose(1,0) # (n_sources, n_bins) -> (n_bins, n_sources)
