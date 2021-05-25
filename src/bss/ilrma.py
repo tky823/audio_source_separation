@@ -207,6 +207,7 @@ class GaussILRMA(ILRMAbase):
         return s.format(**self.__dict__)
 
     def update_once(self):
+        domain = self.domain
         eps = self.eps
 
         self.update_source_model()
@@ -231,21 +232,21 @@ class GaussILRMA(ILRMAbase):
                 if self.partitioning:
                     Z = self.latent
                     
-                    Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
+                    Zaux = Z / (aux[:,np.newaxis]**domain) # (n_sources, n_bases)
                     Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
                     T = T * Zauxsum # (n_bins, n_bases)
                     Z = Zaux / Zauxsum # (n_sources, n_bases)
                     self.latent = Z
                 else:
-                    T = T / (aux[:,np.newaxis,np.newaxis]**2)
+                    T = T / (aux[:,np.newaxis,np.newaxis]**domain)
             elif self.normalize == 'projection-back':
                 if self.partitioning:
                     raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
                 scale = projection_back(Y, reference=X[self.reference_id])
                 Y = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
-                X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-                X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
-                W = Y.transpose(1,0,2) @ X_Hermite @ np.linalg.inv(X @ X_Hermite) # (n_bins, n_sources, n_channels)
+                transposed_scale = scale.transpose(1,0) # (n_sources, n_bins) -> (n_bins, n_sources)
+                W = W * transposed_scale[...,np.newaxis] # (n_bins, n_sources, n_channels)
+                T = T * np.abs(scale[...,np.newaxis])**domain
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
 
@@ -506,27 +507,30 @@ class tILRMA(ILRMAbase):
         self.estimation = Y
         
         if self.normalize:
-            P = np.abs(Y)**2
-            aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
-            aux[aux < eps] = eps
+            if self.normalize == 'power':
+                P = np.abs(Y)**2
+                aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
+                aux[aux < eps] = eps
 
-            # Normalize
-            W = W / aux[np.newaxis,:,np.newaxis]
-            Y = Y / aux[:,np.newaxis,np.newaxis]
+                # Normalize
+                W = W / aux[np.newaxis,:,np.newaxis]
+                Y = Y / aux[:,np.newaxis,np.newaxis]
 
-            if self.partitioning:
-                Z = self.latent
-                T = self.base
-                Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
-                Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
-                T = T * Zauxsum # (n_bins, n_bases)
-                Z = Zaux / Zauxsum # (n_sources, n_bases)
-                self.latent = Z
-                self.base = T
+                if self.partitioning:
+                    Z = self.latent
+                    T = self.base
+                    Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
+                    Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
+                    T = T * Zauxsum # (n_bins, n_bases)
+                    Z = Zaux / Zauxsum # (n_sources, n_bases)
+                    self.latent = Z
+                    self.base = T
+                else:
+                    T = self.base
+                    T = T / (aux[:,np.newaxis,np.newaxis]**2)
+                    self.base = T
             else:
-                T = self.base
-                T = T / (aux[:,np.newaxis,np.newaxis]**2)
-                self.base = T
+                raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
             
             self.demix_filter = W
             self.estimation = Y
@@ -1009,12 +1013,13 @@ if __name__ == '__main__':
     """
 
     _test_conv()
+
     print("="*10, "Gauss-ILRMA", "="*10)
-    print("-"*10, "with partitioning function", "-"*10)
+    print("-"*10, "without partitioning function", "-"*10)
     _test(method='Gauss', n_bases=2, partitioning=False)
     print()
 
-    print("-"*10, "without partitioning function", "-"*10)
+    print("-"*10, "with partitioning function", "-"*10)
     _test(method='Gauss', n_bases=5, partitioning=True)
     print()
 
@@ -1022,7 +1027,7 @@ if __name__ == '__main__':
     print("-"*10, "without partitioning function", "-"*10)
     _test(method='t', n_bases=2, partitioning=False)
     print()
-    # _test(method='t', n_bases=5, partitioning=True)
+    _test(method='t', n_bases=5, partitioning=True)
 
     print("="*10, "Consistent-ILRMA", "="*10)
     _test_consistent_ilrma(n_bases=5, partitioning=False)
