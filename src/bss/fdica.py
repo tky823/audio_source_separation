@@ -41,7 +41,8 @@ class FDICAbase:
             W = np.eye(n_sources, n_channels, dtype=np.complex128)
             self.demix_filter = np.tile(W, reps=(n_bins, 1, 1))
         else:
-            W = self.demix_filter
+            W = self.demix_filter.copy()
+            self.demix_filter = W
         self.estimation = self.separate(X, demix_filter=W)
         
     def __call__(self, input, iteration=100, **kwargs):
@@ -58,6 +59,10 @@ class FDICAbase:
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
+        
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -65,7 +70,7 @@ class FDICAbase:
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
-
+            
             if self.callbacks is not None:
                 for callback in self.callbacks:
                     callback(self)
@@ -158,6 +163,9 @@ class GradFDICAbase(FDICAbase):
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
 
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -165,7 +173,7 @@ class GradFDICAbase(FDICAbase):
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
-
+            
             if self.callbacks is not None:
                 for callback in self.callbacks:
                     callback(self)
