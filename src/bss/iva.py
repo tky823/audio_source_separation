@@ -663,13 +663,14 @@ class AuxGaussIVA(AuxIVAbase):
             W = self.demix_filter
             Y = self.separate(X, demix_filter=W)
         
-        n_bins = self.n_bins
+        n_bins, n_frames = self.n_bins, self.n_frames
         eps = self.eps
+
         Y = self.separate(X, demix_filter=W)
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
         R = P.mean(axis=1) # (n_sources, n_frames)
         R[R < eps] = eps
-        loss = (2 * n_bins) * np.sum(np.log(R), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+        loss = n_bins * np.sum(np.log(R)) - 2 * n_frames * np.log(np.abs(np.linalg.det(W))).sum()
 
         return loss
 
@@ -835,6 +836,7 @@ def _test_aux_iva(method='AuxLaplaceIVA'):
     mic_indices = [2, 5]
     degrees = [60, 300]
     titles = ['man-16000', 'woman-16000']
+    # titles = ['sample-song/sample2_source1', 'sample-song/sample2_source2']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
     
@@ -992,7 +994,6 @@ def _test_over_iva(method='OverAuxLaplaceIVA'):
     plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
 
-
 def _test_prox_iva(method='ProxLaplaceIVA'):
     np.random.seed(111)
     
@@ -1097,7 +1098,7 @@ if __name__ == '__main__':
     
     print("="*10, "AuxIVA-IP", "="*10)
     print("-"*10, "AuxLaplaceIVA-IP", "-"*10)
-    _test_aux_iva(method='AuxLaplaceIVA-IP')
+    #_test_aux_iva(method='AuxLaplaceIVA-IP')
     print()
     print("-"*10, "AuxGaussIVA-IP", "-"*10)
     _test_aux_iva(method='AuxGaussIVA-IP')
@@ -1105,7 +1106,7 @@ if __name__ == '__main__':
 
     print("="*10, "AuxIVA-ISS", "="*10)
     print("-"*10, "AuxLaplaceIVA-ISS", "-"*10)
-    _test_aux_iva(method='AuxLaplaceIVA-ISS')
+    #_test_aux_iva(method='AuxLaplaceIVA-ISS')
     print()
     print("-"*10, "AuxGaussIVA-ISS", "-"*10)
     _test_aux_iva(method='AuxGaussIVA-ISS')
