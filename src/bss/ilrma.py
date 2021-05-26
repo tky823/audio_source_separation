@@ -1,3 +1,4 @@
+import warnings
 import numpy as np
 
 from algorithm.stft import stft, istft
@@ -172,6 +173,9 @@ class GaussILRMA(ILRMAbase):
         self.domain = domain
         self.reference_id = reference_id
         self.threshold = threshold
+
+        if self.algorithm_spatial == 'ISS':
+            warnings.warn("in progress", UserWarning)
     
     def __call__(self, input, iteration=100, **kwargs):
         """
