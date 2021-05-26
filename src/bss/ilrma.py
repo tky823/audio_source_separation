@@ -10,7 +10,7 @@ class ILRMAbase:
     """
     Independent Low-rank Matrix Analysis
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize=True, algorithm_spatial='IP', callbacks=None, recordable_loss=True, eps=EPS):
         if callbacks is not None:
             if callable(callbacks):
                 callbacks = [callbacks]
@@ -22,6 +22,7 @@ class ILRMAbase:
         self.n_bases = n_bases
         self.partitioning = partitioning
         self.normalize = normalize
+        self.algorithm_spatial = algorithm_spatial
 
         self.input = None
         self.recordable_loss = recordable_loss
@@ -52,6 +53,10 @@ class ILRMAbase:
         else:
             W = self.demix_filter.copy()
             self.demix_filter = W
+        
+        if self.algorithm_spatial == 'ISS':
+            self.demix_filter = None
+        
         self.estimation = self.separate(X, demix_filter=W)
 
         if self.partitioning:
@@ -88,8 +93,9 @@ class ILRMAbase:
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()    
-        self.loss.append(loss)
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
 
         if self.callbacks is not None:
             for callback in self.callbacks:
@@ -98,8 +104,9 @@ class ILRMAbase:
         for idx in range(iteration):
             self.update_once()
 
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
 
             if self.callbacks is not None:
                 for callback in self.callbacks:
@@ -110,7 +117,7 @@ class ILRMAbase:
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "ILRMA("
         s += "n_bases={n_bases}"
         s += ", partitioning={partitioning}"
@@ -130,11 +137,19 @@ class ILRMAbase:
         Returns:
             output (n_channels, n_bins, n_frames): 
         """
-        input = input.transpose(1,0,2)
+        input = input.transpose(1, 0, 2)
         estimation = demix_filter @ input
-        output = estimation.transpose(1,0,2)
+        output = estimation.transpose(1, 0, 2)
 
         return output
+    
+    def compute_demix_filter(self, estimation, input):
+        X, Y = input, estimation
+        X_Hermite = X.transpose(1, 2, 0).conj()
+        XX_Hermite = X.transpose(1, 0, 2) @ X_Hermite
+        demix_filter = Y.transpose(1, 0, 2) @ X_Hermite @ np.linalg.inv(XX_Hermite)
+
+        return demix_filter
     
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
@@ -144,13 +159,13 @@ class GaussILRMA(ILRMAbase):
     Reference: "Determined Blind Source Separation Unifying Independent Vector Analysis and Nonnegative Matrix Factorization"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, domain=2, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_bases=10, domain=2, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
 
@@ -169,39 +184,71 @@ class GaussILRMA(ILRMAbase):
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()    
-        self.loss.append(loss)
-
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
+        
         if self.callbacks is not None:
+            if self.algorithm_spatial == 'ISS':
+                # In `update_once()`, demix_filter isn't updated
+                # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+                X, Y = self.input, self.estimation
+                self.demix_filter = self.compute_demix_filter(Y, X)
+            
+                for callback in self.callbacks:
+                    callback(self)
+                
+                self.demix_filter = None
+            else:
                 for callback in self.callbacks:
                     callback(self)
 
         for idx in range(iteration):
             self.update_once()
 
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
 
             if self.callbacks is not None:
-                for callback in self.callbacks:
-                    callback(self)
+                if self.algorithm_spatial == 'ISS':
+                    # In `update_once()`, demix_filter isn't updated
+                    # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+                    X, Y = self.input, self.estimation
+                    self.demix_filter = self.compute_demix_filter(Y, X)
+                
+                    for callback in self.callbacks:
+                        callback(self)
+                    
+                    self.demix_filter = None
+                else:
+                    for callback in self.callbacks:
+                        callback(self)
+        
+        if self.algorithm_spatial == 'ISS':
+            # In `update_once()`, demix_filter isn't updated
+            # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+            X, Y = self.input, self.estimation
+            self.demix_filter = self.compute_demix_filter(Y, X)
+        else:
+            X, W = input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
         
         reference_id = self.reference_id
-        X, W = input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
-
+        
         scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        output = Y * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "Gauss-ILRMA("
         s += "n_bases={n_bases}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
         s += ", normalize={normalize}"
+        s += ", algorithm_spatial={algorithm_spatial}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -212,54 +259,64 @@ class GaussILRMA(ILRMAbase):
 
         self.update_source_model()
         self.update_space_model()
-
-        X, W = self.input, self.demix_filter
-        T = self.base
-
-        Y = self.separate(X, demix_filter=W)
-        self.estimation = Y
         
         if self.normalize:
+            if self.algorithm_spatial == 'ISS':
+                X, Y = self.input, self.estimation
+                W = self.compute_demix_filter(Y, X)
+            else:
+                X, W = self.input, self.demix_filter
+                Y = self.separate(X, demix_filter=W)
+                self.estimation = Y
+            
+            T = self.base
+
             if self.normalize == 'power':
                 P = np.abs(Y)**2
-                aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
+                aux = np.sqrt(P.mean(axis=(1, 2))) # (n_sources,)
                 aux[aux < eps] = eps
 
                 # Normalize
-                W = W / aux[np.newaxis,:,np.newaxis]
-                Y = Y / aux[:,np.newaxis,np.newaxis]
+                W = W / aux[np.newaxis, :, np.newaxis]
+                Y = Y / aux[:, np.newaxis, np.newaxis]
 
                 if self.partitioning:
                     Z = self.latent
                     
-                    Zaux = Z / (aux[:,np.newaxis]**domain) # (n_sources, n_bases)
+                    Zaux = Z / (aux[:, np.newaxis]**domain) # (n_sources, n_bases)
                     Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
                     T = T * Zauxsum # (n_bins, n_bases)
                     Z = Zaux / Zauxsum # (n_sources, n_bases)
                     self.latent = Z
                 else:
-                    T = T / (aux[:,np.newaxis,np.newaxis]**domain)
+                    T = T / (aux[:, np.newaxis, np.newaxis]**domain)
             elif self.normalize == 'projection-back':
                 if self.partitioning:
                     raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
                 scale = projection_back(Y, reference=X[self.reference_id])
-                Y = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
-                transposed_scale = scale.transpose(1,0) # (n_sources, n_bins) -> (n_bins, n_sources)
-                W = W * transposed_scale[...,np.newaxis] # (n_bins, n_sources, n_channels)
-                T = T * np.abs(scale[...,np.newaxis])**domain
+                Y = Y * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
+                transposed_scale = scale.transpose(1, 0) # (n_sources, n_bins) -> (n_bins, n_sources)
+                W = W * transposed_scale[..., np.newaxis] # (n_bins, n_sources, n_channels)
+                T = T * np.abs(scale[..., np.newaxis])**domain
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
 
-            self.demix_filter = W
             self.estimation = Y
             self.base = T
+
+            if self.demix_filter is not None:
+                self.demix_filter = W
     
     def update_source_model(self):
         domain = self.domain
         eps = self.eps
 
-        X, W = self.input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        if self.demix_filter is None:
+            Y = self.estimation
+        else:
+            X, W = self.input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
+        
         P = np.abs(Y)**2
         
         if self.partitioning:
@@ -268,36 +325,36 @@ class GaussILRMA(ILRMAbase):
             Z = self.latent # (n_sources, n_bases)
             T, V = self.base, self.activation
 
-            TV = T[:,:,np.newaxis] * V[np.newaxis,:,:] # (n_bins, n_bases, n_frames)
-            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
-            ZTV = ZT @ V[np.newaxis,:,:] # (n_sources, n_bins, n_frames)
+            TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
+            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_bases)
+            ZTV = ZT @ V[np.newaxis, :, :] # (n_sources, n_bins, n_frames)
             ZTV[ZTV < eps] = eps
             division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
-            numerator = np.sum(division[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_bases)
-            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_bases)
+            numerator = np.sum(division[:, :, np.newaxis, :] * TV, axis=(1, 3)) # (n_sources, n_bases)
+            denominator = np.sum(ZTV_inverse[:, :, np.newaxis, :] * TV, axis=(1, 3)) # (n_sources, n_bases)
             denominator[denominator < eps] = eps
             Z = np.sqrt(numerator / denominator) # (n_sources, n_bases)
             Z = Z / Z.sum(axis=0) # (n_sources, n_bases)
 
             # Update bases
-            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
-            ZTV = ZT @ V[np.newaxis,:,:] # (n_sources, n_bins, n_frames)
+            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_bases)
+            ZTV = ZT @ V[np.newaxis, :, :] # (n_sources, n_bins, n_frames)
             ZTV[ZTV < eps] = eps
             division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
-            ZV = Z[:,:,np.newaxis] * V[np.newaxis,:,:] # (n_sources, n_bases, n_frames)
-            numerator = np.sum(division[:,:,np.newaxis,:] * ZV[:,np.newaxis,:,:], axis=(0,3)) # (n_bins, n_bases)
-            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:] * ZV[:,np.newaxis,:,:], axis=(0,3)) # (n_bins, n_bases)
+            ZV = Z[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_sources, n_bases, n_frames)
+            numerator = np.sum(division[:, :, np.newaxis, :] * ZV[:, np.newaxis, :, :], axis=(0, 3)) # (n_bins, n_bases)
+            denominator = np.sum(ZTV_inverse[:, :, np.newaxis, :] * ZV[:, np.newaxis, :, :], axis=(0, 3)) # (n_bins, n_bases)
             denominator[denominator < eps] = eps
             T = T * np.sqrt(numerator / denominator) # (n_bins, n_bases)
 
             # Update activations
-            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
-            ZTV = ZT @ V[np.newaxis,:,:] # (n_sources, n_bins, n_frames)
+            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_bases)
+            ZTV = ZT @ V[np.newaxis, :, :] # (n_sources, n_bins, n_frames)
             ZTV[ZTV < eps] = eps
             division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
-            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
-            numerator = np.sum(division[:,:,np.newaxis,:] * ZT[:,:,:,np.newaxis], axis=(0,1)) # (n_bases, n_frames)
-            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:] * ZT[:,:,:,np.newaxis], axis=(0,1)) # (n_bases, n_frames)
+            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_bases)
+            numerator = np.sum(division[:, :, np.newaxis, :] * ZT[:, :, :, np.newaxis], axis=(0, 1)) # (n_bases, n_frames)
+            denominator = np.sum(ZTV_inverse[:, :, np.newaxis, :] * ZT[:, :, :, np.newaxis], axis=(0, 1)) # (n_bases, n_frames)
             denominator[denominator < eps] = eps
             V = V * np.sqrt(numerator / denominator) # (n_bins, n_bases)
 
@@ -307,7 +364,7 @@ class GaussILRMA(ILRMAbase):
             T, V = self.base, self.activation
 
             # Update bases
-            V_transpose = V.transpose(0,2,1)
+            V_transpose = V.transpose(0, 2, 1)
             TV = T @ V
             TV[TV < eps] = eps
             division, TV_inverse = P / (TV**((domain + 2) / domain)), 1 / TV
@@ -316,7 +373,7 @@ class GaussILRMA(ILRMAbase):
             T = T * (division @ V_transpose / TVV)**(domain / (domain + 2))
             
             # Update activations
-            T_transpose = T.transpose(0,2,1)
+            T_transpose = T.transpose(0, 2, 1)
             TV = T @ V
             TV[TV < eps] = eps
             division, TV_inverse = P / (TV**((domain + 2) / domain)), 1 / TV
@@ -333,60 +390,83 @@ class GaussILRMA(ILRMAbase):
         domain = self.domain
         eps, threshold = self.eps, self.threshold
 
-        X, W = self.input, self.demix_filter
-        
         if self.partitioning:
             assert domain == 2, "Not support domain = {}".format(domain)
 
             Z = self.latent
             T, V = self.base, self.activation
-            ZTV = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
-            R = ZTV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+            R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
         else:
             T, V = self.base, self.activation
             TV = T @ V
-            R = (TV[...,np.newaxis, np.newaxis])**(2 / domain) # (n_sources, n_bins, n_frames, 1, 1)
-        
-        X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
-        X = X[...,np.newaxis]
-        X_Hermite = X.transpose(0,1,3,2).conj()
-        XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
-        R[R < eps] = eps
-        U = XX / R
-        U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
-        E = np.eye(n_sources, n_channels)
-        E = np.tile(E, reps=(n_bins,1,1)) # (n_bins, n_sources, n_channels)
+            R = TV**(2 / domain) # (n_sources, n_bins, n_frames)
 
-        for source_idx in range(n_sources):
-            # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-            w_n_Hermite = W[:,source_idx,:] # (n_bins, n_channels)
-            U_n = U[source_idx] # (n_bins, n_channels, n_channels)
-            WU = W @ U_n # (n_bins, n_sources, n_channels)
-            condition = np.linalg.cond(WU) < threshold # (n_bins,)
-            condition = condition[:,np.newaxis] # (n_bins, 1)
-            e_n = E[:,source_idx,:]
-            w_n = np.linalg.solve(WU, e_n)
-            wUw = w_n[:,np.newaxis,:].conj() @ U_n @ w_n[:,:,np.newaxis]
-            denominator = np.sqrt(wUw[...,0])
-            w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
-            # if condition number is too big, `denominator[denominator < eps] = eps` may diverge of cost function.
-            W[:,source_idx,:] = w_n_Hermite
+        X, Y = self.input, self.estimation
 
-        self.demix_filter = W
+        if self.algorithm_spatial == 'IP':
+            W = self.demix_filter
+            R = R[..., np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+            
+            X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+            X = X[..., np.newaxis]
+            X_Hermite = X.transpose(0, 1, 3, 2).conj()
+            XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+            R[R < eps] = eps
+            U = XX / R
+            U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
+            E = np.eye(n_sources, n_channels)
+            E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
+
+            for source_idx in range(n_sources):
+                # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
+                w_n_Hermite = W[:, source_idx, :] # (n_bins, n_channels)
+                U_n = U[source_idx] # (n_bins, n_channels, n_channels)
+                WU = W @ U_n # (n_bins, n_sources, n_channels)
+                condition = np.linalg.cond(WU) < threshold # (n_bins,)
+                condition = condition[:, np.newaxis] # (n_bins, 1)
+                e_n = E[:, source_idx, :]
+                w_n = np.linalg.solve(WU, e_n)
+                wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
+                denominator = np.sqrt(wUw[..., 0])
+                w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
+                # if condition number is too big, `denominator[denominator < eps] = eps` may diverge of cost function.
+                W[:, source_idx, :] = w_n_Hermite
+
+            self.demix_filter = W
+        elif self.algorithm_spatial == 'ISS':
+            R[R < eps] = eps # (n_sources, n_bins, n_frames)
+
+            for n in range(n_sources):
+                U_n = np.sum(Y * Y[n].conj() / R, axis=2) # (n_sources, n_bins)
+                D_n = np.sum(np.abs(Y[n])**2 / R, axis=2) # (n_sources, n_bins)
+                V_n = U_n / D_n # (n_sources, n_bins)
+                V_n[n] = 1 - 1 / np.sqrt(D_n[n])
+                Y = Y - V_n[:, :, np.newaxis] * Y[n]
+            
+            self.estimation = Y
+        else:
+            raise NotImplementedError("Not support {}-based spatial update.".format(self.algorithm_spatial))
 
     def compute_negative_loglikelihood(self):
         n_frames = self.n_frames
         domain = self.domain
         eps = self.eps
 
-        X, W = self.input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        X = self.input
+
+        if self.demix_filter is None:
+            Y = self.estimation
+            W = self.compute_demix_filter(Y, X)
+        else:
+            W = self.demix_filter
+            Y = self.separate(X, demix_filter=W)
+        
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
 
         if self.partitioning:
             Z = self.latent
             T, V = self.base, self.activation
-            ZTV = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
+            ZTV = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
             R = ZTV**(2 / domain)
         else:
             T, V = self.base, self.activation
@@ -403,28 +483,31 @@ class GGDILRMA(ILRMAbase):
     Reference: "Generalized independent low-rank matrix analysis using heavy-tailed distributions for blind source separation"
     See: https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-018-0549-5
     """
-    def __init__(self, n_bases=10, beta=1, domain=2, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, n_bases=10, beta=1, domain=2, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             beta: shape parameter. beta = 1: Laplace distribution, beta = 2: Gaussian distribution.
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.beta = beta
         self.domain = domain
         self.reference_id = reference_id
 
+        assert self.algorithm_spatial == 'IP', "Supports only IP-based spatial update."
+
         raise NotImplementedError("Implement GGD-ILRMA")
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "GGD-ILRMA("
         s += "n_bases={n_bases}"
         s += ", beta={beta}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
         s += ", normalize={normalize}"
+        s += ", algorithm_spatial={algorithm_spatial}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -434,18 +517,20 @@ class tILRMA(ILRMAbase):
     Reference: "Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation"
     See: https://ieeexplore.ieee.org/document/8168129
     """
-    def __init__(self, n_bases=10, nu=1, domain=2, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, n_bases=10, nu=1, domain=2, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             nu: degree of freedom. nu = 1: Cauchy distribution, nu -> infty: Gaussian distribution.
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.nu = nu
         self.domain = domain
         self.reference_id = reference_id
+
+        assert self.algorithm_spatial == 'IP', "Supports only IP-based spatial update."
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -458,40 +543,72 @@ class tILRMA(ILRMAbase):
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()    
-        self.loss.append(loss)
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
 
         if self.callbacks is not None:
-            for callback in self.callbacks:
-                callback(self)
+            if self.algorithm_spatial == 'ISS':
+                # In `update_once()`, demix_filter isn't updated
+                # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+                X, Y = self.input, self.estimation
+                self.demix_filter = self.compute_demix_filter(Y, X)
+            
+                for callback in self.callbacks:
+                    callback(self)
+                
+                self.demix_filter = None
+            else:
+                for callback in self.callbacks:
+                    callback(self)
 
         for idx in range(iteration):
             self.update_once()
 
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
 
             if self.callbacks is not None:
-                for callback in self.callbacks:
-                    callback(self)
+                if self.algorithm_spatial == 'ISS':
+                    # In `update_once()`, demix_filter isn't updated
+                    # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+                    X, Y = self.input, self.estimation
+                    self.demix_filter = self.compute_demix_filter(Y, X)
+                
+                    for callback in self.callbacks:
+                        callback(self)
+                    
+                    self.demix_filter = None
+                else:
+                    for callback in self.callbacks:
+                        callback(self)
         
         reference_id = self.reference_id
-        X, W = input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+
+        if self.algorithm_spatial == 'ISS':
+            # In `update_once()`, demix_filter isn't updated
+            # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+            X, Y = self.input, self.estimation
+            self.demix_filter = self.compute_demix_filter(Y, X)
+        else:
+            X, W = input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
 
         scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        output = Y * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "t-ILRMA("
         s += "n_bases={n_bases}"
         s += ", nu={nu}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
         s += ", normalize={normalize}"
+        s += ", algorithm_spatial={algorithm_spatial}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -502,24 +619,28 @@ class tILRMA(ILRMAbase):
         self.update_source_model()
         self.update_space_model()
 
-        X, W = self.input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
-        self.estimation = Y
-        
         if self.normalize:
+            if self.algorithm_spatial == 'ISS':
+                X, Y = self.input, self.estimation
+                W = self.compute_demix_filter(Y, X)
+            else:
+                X, W = self.input, self.demix_filter
+                Y = self.separate(X, demix_filter=W)
+                self.estimation = Y
+
             if self.normalize == 'power':
                 P = np.abs(Y)**2
-                aux = np.sqrt(P.mean(axis=(1,2))) # (n_sources,)
+                aux = np.sqrt(P.mean(axis=(1, 2))) # (n_sources,)
                 aux[aux < eps] = eps
 
                 # Normalize
-                W = W / aux[np.newaxis,:,np.newaxis]
-                Y = Y / aux[:,np.newaxis,np.newaxis]
+                W = W / aux[np.newaxis, :, np.newaxis]
+                Y = Y / aux[:, np.newaxis, np.newaxis]
 
                 if self.partitioning:
                     Z = self.latent
                     T = self.base
-                    Zaux = Z / (aux[:,np.newaxis]**2) # (n_sources, n_bases)
+                    Zaux = Z / (aux[:, np.newaxis]**2) # (n_sources, n_bases)
                     Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
                     T = T * Zauxsum # (n_bins, n_bases)
                     Z = Zaux / Zauxsum # (n_sources, n_bases)
@@ -527,13 +648,15 @@ class tILRMA(ILRMAbase):
                     self.base = T
                 else:
                     T = self.base
-                    T = T / (aux[:,np.newaxis,np.newaxis]**2)
+                    T = T / (aux[:, np.newaxis, np.newaxis]**2)
                     self.base = T
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
             
-            self.demix_filter = W
             self.estimation = Y
+
+            if self.demix_filter is not None:
+                self.demix_filter = W
 
     def update_source_model(self):
         nu = self.nu
@@ -542,8 +665,12 @@ class tILRMA(ILRMAbase):
 
         assert domain == 2, "Only domain = 2 is supported."
 
-        X, W = self.input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        if self.demix_filter is None:
+            Y = self.estimation
+        else:
+            X, W = self.input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
+
         P = np.abs(Y)**2
         
         if self.partitioning:
@@ -617,58 +744,69 @@ class tILRMA(ILRMAbase):
         nu = self.nu
         eps = self.eps
 
-        X, W = self.input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        if self.demix_filter is None:
+            Y = self.estimation
+        else:
+            X, W = self.input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
 
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
         
         if self.partitioning:
             Z = self.latent
             T, V = self.base, self.activation
-            ZTV = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
-            R = ZTV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+            R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
         else:
             T, V = self.base, self.activation
-            TV = T @ V
-            R = TV[...,np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+            R = T @ V
         
-        R[R < eps] = eps
-        Xi = (nu * R + 2 * P[..., np.newaxis, np.newaxis]) / (nu + 2)
+        if self.algorithm_spatial == 'IP':
+            R = R[..., np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+            R[R < eps] = eps
+            Xi = (nu * R + 2 * P[..., np.newaxis, np.newaxis]) / (nu + 2)
 
-        X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
-        X = X[...,np.newaxis]
-        X_Hermite = X.transpose(0,1,3,2).conj()
-        XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
-        U = XX / Xi
-        U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
+            X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+            X = X[..., np.newaxis]
+            X_Hermite = X.transpose(0, 1, 3, 2).conj()
+            XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+            U = XX / Xi
+            U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
 
-        for source_idx in range(n_sources):
-            # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-            U_n = U[source_idx] # (n_bins, n_channels, n_channels)
-            WU = W @ U_n # (n_bins, n_sources, n_channels)
-            WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
-            w = WU_inverse[...,source_idx] # (n_bins, n_channels)
-            wUw = w[:,np.newaxis,:].conj() @ U_n @ w[:,:,np.newaxis]
-            denominator = np.sqrt(wUw[...,0])
-            denominator[denominator < eps] = eps
-            W[:, source_idx, :] = w.conj() / denominator
+            for source_idx in range(n_sources):
+                # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
+                U_n = U[source_idx] # (n_bins, n_channels, n_channels)
+                WU = W @ U_n # (n_bins, n_sources, n_channels)
+                WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
+                w = WU_inverse[..., source_idx] # (n_bins, n_channels)
+                wUw = w[:, np.newaxis, :].conj() @ U_n @ w[:, :, np.newaxis]
+                denominator = np.sqrt(wUw[..., 0])
+                denominator[denominator < eps] = eps
+                W[:, source_idx, :] = w.conj() / denominator
 
-        self.demix_filter = W
+            self.demix_filter = W
+        else:
+            raise ValueError("Not support {}-based spatial update.")
 
     def compute_negative_loglikelihood(self):
         n_frames = self.n_frames
         nu = self.nu
         eps = self.eps
 
-        W = self.demix_filter
-        Y = self.estimation
+        X = self.input
+
+        if self.demix_filter is None:
+            Y = self.estimation
+            W = self.compute_demix_filter(Y, X)
+        else:
+            W = self.demix_filter
+            Y = self.separate(X, demix_filter=W)
 
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
 
         if self.partitioning:
             Z = self.latent
             T, V = self.base, self.activation
-            R = np.sum(Z[:,np.newaxis,:,np.newaxis] * T[:,:,np.newaxis] * V[np.newaxis,:,:], axis=2) # (n_sources, n_bins, n_frames)
+            R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
         else:
             T, V = self.base, self.activation
             R = T @ V # (n_sources, n_bins, n_frames)
@@ -682,10 +820,12 @@ class KLILRMA(ILRMAbase):
     """
     Reference: "Independent Low-Rank Matrix Analysis Based on Generalized Kullback-Leibler Divergence"
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+    def __init__(self, n_bases=10, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
+
+        assert self.algorithm_spatial == 'IP', "Supports only IP-based spatial update."
 
         raise NotImplementedError("Implement KL-ILRMA")
     
@@ -722,17 +862,18 @@ class KLILRMA(ILRMAbase):
         Y = self.separate(X, demix_filter=W)
 
         scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        output = Y * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "KL-ILRMA("
         s += "n_bases={n_bases}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
         s += ", normalize={normalize}"
+        s += ", algorithm_spatial={algorithm_spatial}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -742,14 +883,16 @@ class RegularizedILRMA(ILRMAbase):
     Reference: "Blind source separation based on independent low-rank matrix analysis with sparse regularization for time-series activity"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize='power', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, n_bases=10, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             normalize <str>
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
+
+        assert self.algorithm_spatial == 'IP', "Supports only IP-based spatial update."
 
         raise NotImplementedError("Implement Regularized ILRMA")
 
@@ -758,13 +901,13 @@ class ConsistentGaussILRMA(GaussILRMA):
     Reference: "Consistent independent low-rank matrix analysis for determined blind source separation"
     See https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-020-00704-4
     """
-    def __init__(self, n_bases=10, partitioning=False, reference_id=0, fft_size=None, hop_size=None, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_bases=10, partitioning=False, algorithm_spatial='IP', reference_id=0, fft_size=None, hop_size=None, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=False, reference_id=reference_id, threshold=threshold, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=False, algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
 
         if fft_size is None:
             raise ValueError("Specify `fft_size`.")
@@ -773,6 +916,8 @@ class ConsistentGaussILRMA(GaussILRMA):
             hop_size = fft_size // 2
         
         self.fft_size, self.hop_size = fft_size, hop_size
+
+        assert self.algorithm_spatial == 'IP', "Supports only IP-based spatial update."
 
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -785,39 +930,71 @@ class ConsistentGaussILRMA(GaussILRMA):
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()    
-        self.loss.append(loss)
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
 
         if self.callbacks is not None:
-            for callback in self.callbacks:
-                callback(self)
+            if self.algorithm_spatial == 'ISS':
+                # In `update_once()`, demix_filter isn't updated
+                # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+                X, Y = self.input, self.estimation
+                self.demix_filter = self.compute_demix_filter(Y, X)
+            
+                for callback in self.callbacks:
+                    callback(self)
+                
+                self.demix_filter = None
+            else:
+                for callback in self.callbacks:
+                    callback(self)
 
         for idx in range(iteration):
             self.update_once()
 
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
-
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
+            
             if self.callbacks is not None:
-                for callback in self.callbacks:
-                    callback(self)
+                if self.algorithm_spatial == 'ISS':
+                    # In `update_once()`, demix_filter isn't updated
+                    # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+                    X, Y = self.input, self.estimation
+                    self.demix_filter = self.compute_demix_filter(Y, X)
+                
+                    for callback in self.callbacks:
+                        callback(self)
+                    
+                    self.demix_filter = None
+                else:
+                    for callback in self.callbacks:
+                        callback(self)
         
         reference_id = self.reference_id
-        X, W = input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+
+        if self.algorithm_spatial == 'ISS':
+            # In `update_once()`, demix_filter isn't updated
+            # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
+            X, Y = self.input, self.estimation
+            self.demix_filter = self.compute_demix_filter(Y, X)
+        else:
+            X, W = input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
 
         scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        output = Y * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "Consistent-GaussILRMA("
         s += "n_bases={n_bases}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
         s += ", normalize={normalize}"
+        s += ", algorithm_spatial={algorithm_spatial}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -829,21 +1006,28 @@ class ConsistentGaussILRMA(GaussILRMA):
         self.update_source_model()
         self.update_space_model()
 
-        X, W = self.input, self.demix_filter
+        if self.algorithm_spatial == 'ISS':
+            X, Y = self.input, self.estimation
+            W = self.compute_demix_filter(Y, X)
+        else:
+            X, W = self.input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
+        
         T = self.base
-        Y = self.separate(X, demix_filter=W)
 
         if self.partitioning:
             raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
         scale = projection_back(Y, reference=X[self.reference_id])
-        transposed_scale = scale.transpose(1,0) # (n_sources, n_bins) -> (n_bins, n_sources)
-        W = W * transposed_scale[...,np.newaxis] # (n_bins, n_sources, n_channels)
+        transposed_scale = scale.transpose(1, 0) # (n_sources, n_bins) -> (n_bins, n_sources)
+        W = W * transposed_scale[..., np.newaxis] # (n_bins, n_sources, n_channels)
         Y = self.separate(X, demix_filter=W)
-        T = T * np.abs(scale[...,np.newaxis])**2
+        T = T * np.abs(scale[..., np.newaxis])**2
 
-        self.demix_filter = W
         self.estimation = Y
         self.base = T
+
+        if self.demix_filter is not None:
+            self.demix_filter = W
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
@@ -880,7 +1064,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
     return mixed_signals
 
-def _test(method, n_bases=10, domain=2, partitioning=False):
+def _test_gauss_ilrma(algorithm_spatial, n_bases=10, domain=2, partitioning=False):
     np.random.seed(111)
     
     # Room impulse response
@@ -905,14 +1089,7 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
     n_channels = len(titles)
     iteration = 50
 
-    if method == 'Gauss':
-        ilrma = GaussILRMA(n_bases=n_bases, domain=domain, partitioning=partitioning)
-    elif method == 't':
-        nu = 1000
-        ilrma = tILRMA(n_bases=n_bases, nu=nu, partitioning=partitioning)
-    else:
-        raise ValueError("Not support {}-ILRMA.".format(method))
-    
+    ilrma = GaussILRMA(n_bases=n_bases, domain=domain, partitioning=partitioning, algorithm_spatial=algorithm_spatial)
     print(ilrma)
     estimation = ilrma(mixture, iteration=iteration)
 
@@ -922,13 +1099,58 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
 
     for idx in range(n_channels):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/ILRMA/{}ILRMA/partitioning{}/mixture-{}_estimated-iter{}-{}.wav".format(method, int(partitioning), sr, iteration, idx), signal=_estimated_signal, sr=sr)
+        write_wav("data/ILRMA/GaussILRMA-{}/partitioning{}/mixture-{}_estimated-iter{}-{}.wav".format(algorithm_spatial, int(partitioning), sr, iteration, idx), signal=_estimated_signal, sr=sr)
     
     plt.figure()
     plt.plot(ilrma.loss, color='black')
     plt.xlabel('Iteration')
     plt.ylabel('Loss')
-    plt.savefig('data/ILRMA/{}ILRMA/partitioning{}/loss.png'.format(method, int(partitioning)), bbox_inches='tight')
+    plt.savefig('data/ILRMA/GaussILRMA-{}/partitioning{}/loss.png'.format(algorithm_spatial, int(partitioning)), bbox_inches='tight')
+    plt.close()
+
+
+def _test_t_ilrma(algorithm_spatial, n_bases=10, partitioning=False):
+    np.random.seed(111)
+    
+    # Room impulse response
+    sr = 16000
+    reverb = 0.16
+    duration = 0.5
+    samples = int(duration * sr)
+    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
+    mic_indices = [2, 5]
+    degrees = [60, 300]
+    titles = ['man-16000', 'woman-16000']
+
+    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
+
+    n_sources, T = mixed_signal.shape
+    
+    # STFT
+    fft_size, hop_size = 2048, 1024
+    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
+
+    # t-ILRMA
+    n_channels = len(titles)
+    iteration = 50
+    nu = 1000
+    ilrma = tILRMA(n_bases=n_bases, nu=nu, partitioning=partitioning, algorithm_spatial=algorithm_spatial)
+    print(ilrma)
+    estimation = ilrma(mixture, iteration=iteration)
+
+    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
+    
+    print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
+
+    for idx in range(n_channels):
+        _estimated_signal = estimated_signal[idx]
+        write_wav("data/ILRMA/tILRMA-{}/partitioning{}/mixture-{}_estimated-iter{}-{}.wav".format(algorithm_spatial, int(partitioning), sr, iteration, idx), signal=_estimated_signal, sr=sr)
+    
+    plt.figure()
+    plt.plot(ilrma.loss, color='black')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.savefig('data/ILRMA/tILRMA-{}/partitioning{}/loss.png'.format(algorithm_spatial, int(partitioning)), bbox_inches='tight')
     plt.close()
 
 def _test_consistent_ilrma(n_bases=10, partitioning=False):
@@ -1000,10 +1222,14 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/ILRMA/GaussILRMA/partitioning0", exist_ok=True)
-    os.makedirs("data/ILRMA/GaussILRMA/partitioning1", exist_ok=True)
-    os.makedirs("data/ILRMA/tILRMA/partitioning0", exist_ok=True)
-    os.makedirs("data/ILRMA/tILRMA/partitioning1", exist_ok=True)
+    os.makedirs("data/ILRMA/GaussILRMA-IP/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/GaussILRMA-IP/partitioning1", exist_ok=True)
+    os.makedirs("data/ILRMA/GaussILRMA-ISS/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/GaussILRMA-ISS/partitioning1", exist_ok=True)
+    os.makedirs("data/ILRMA/tILRMA-IP/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/tILRMA-IP/partitioning1", exist_ok=True)
+    os.makedirs("data/ILRMA/tILRMA-ISS/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/tILRMA-ISS/partitioning1", exist_ok=True)
     os.makedirs("data/ILRMA/ConsistentGaussILRMA/partitioning0", exist_ok=True)
     os.makedirs("data/ILRMA/ConsistentGaussILRMA/partitioning1", exist_ok=True)
 
@@ -1014,20 +1240,37 @@ if __name__ == '__main__':
 
     _test_conv()
 
-    print("="*10, "Gauss-ILRMA", "="*10)
+    print("="*10, "Gauss-ILRMA (IP)", "="*10)
     print("-"*10, "without partitioning function", "-"*10)
-    _test(method='Gauss', n_bases=2, partitioning=False)
+    _test_gauss_ilrma(algorithm_spatial='IP', n_bases=2, partitioning=False)
     print()
 
     print("-"*10, "with partitioning function", "-"*10)
-    _test(method='Gauss', n_bases=5, partitioning=True)
+    _test_gauss_ilrma(algorithm_spatial='IP', n_bases=5, partitioning=True)
     print()
 
-    print("="*10, "t-ILRMA", "="*10)
+    print("="*10, "Gauss-ILRMA (ISS)", "="*10)
     print("-"*10, "without partitioning function", "-"*10)
-    _test(method='t', n_bases=2, partitioning=False)
+    _test_gauss_ilrma(algorithm_spatial='ISS', n_bases=2, partitioning=False)
     print()
-    _test(method='t', n_bases=5, partitioning=True)
+
+    print("-"*10, "with partitioning function", "-"*10)
+    _test_gauss_ilrma(algorithm_spatial='ISS', n_bases=5, partitioning=True)
+    print()
+
+    print("="*10, "t-ILRMA (IP)", "="*10)
+    print("-"*10, "without partitioning function", "-"*10)
+    _test_t_ilrma(algorithm_spatial='IP', n_bases=2, partitioning=False)
+    print()
+    # _test_t_ilrma(algorithm_spatial='IP', n_bases=5, partitioning=True)
+    print()
+
+    print("="*10, "t-ILRMA (ISS)", "="*10)
+    print("-"*10, "without partitioning function", "-"*10)
+    # _test_t_ilrma(algorithm_spatial='ISS', n_bases=2, partitioning=False)
+    print()
+    # _test_t_ilrma(algorithm_spatial='ISS', n_bases=5, partitioning=True)
+    print()
 
     print("="*10, "Consistent-ILRMA", "="*10)
     _test_consistent_ilrma(n_bases=5, partitioning=False)
