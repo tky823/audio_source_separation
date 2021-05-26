@@ -82,7 +82,7 @@ class IVAbase:
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "IVA("
         s += ")"
 
@@ -169,7 +169,7 @@ class GradIVAbase(IVAbase):
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "GradIVA("
         s += "lr={lr}"
         s += ")"
@@ -186,7 +186,7 @@ class GradLaplaceIVA(GradIVAbase):
     def __init__(self, lr=1e-1, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
         super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps)
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "NaturalGradIVA("
         s += "lr={lr}"
         s += ")"
@@ -233,7 +233,7 @@ class NaturalGradLaplaceIVA(GradIVAbase):
     def __init__(self, lr=1e-1, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
         super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps)
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "NaturalGradLaplaceIVA("
         s += "lr={lr}"
         s += ")"
@@ -342,7 +342,7 @@ class AuxIVAbase(IVAbase):
         if self.algorithm_spatial == 'ISS':
             self.demix_filter = None
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "AuxIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
@@ -460,26 +460,28 @@ class AuxLaplaceIVA(AuxIVAbase):
             E = np.eye(n_sources, n_channels)
             E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
 
-            for source_idx in range(n_sources):
+            for n in range(n_sources):
                 # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-                w_n_Hermite = W[:, source_idx, :] # (n_bins, n_channels)
-                U_n = U[source_idx] # (n_bins, n_channels, n_channels)
+                w_n_Hermite = W[:, n, :] # (n_bins, n_channels)
+                U_n = U[n] # (n_bins, n_channels, n_channels)
                 WU = W @ U_n # (n_bins, n_sources, n_channels)
                 condition = np.linalg.cond(WU) < threshold # (n_bins,)
                 condition = condition[:, np.newaxis] # (n_bins, 1)
-                e_n = E[:, source_idx, :]
+                e_n = E[:, n, :]
                 w_n = np.linalg.solve(WU, e_n)
                 wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
                 denominator = np.sqrt(wUw[..., 0])
                 w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
                 # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
-                W[:, source_idx, :] = w_n_Hermite
+                W[:, n, :] = w_n_Hermite
             
             self.demix_filter = W
 
             X = self.input
             Y = self.separate(X, demix_filter=W)
         elif self.algorithm_spatial == 'ISS':
+            P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+            R = np.sqrt(P.sum(axis=1)) # (n_sources, n_frames)
             R[R < eps] = eps
 
             for n in range(n_sources):
@@ -497,6 +499,8 @@ class AuxLaplaceIVA(AuxIVAbase):
         self.estimation = Y
     
     def compute_negative_loglikelihood(self):
+        n_frames = self.n_frames
+
         X = self.input
         if self.demix_filter is None:
             Y = self.estimation
@@ -507,7 +511,7 @@ class AuxLaplaceIVA(AuxIVAbase):
         
         P = np.sum(np.abs(Y)**2, axis=1)
         R = 2 * np.sqrt(P)
-        loss = np.sum(R, axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+        loss = R.sum() - 2 * n_frames * np.log(np.abs(np.linalg.det(W))).sum()
 
         return loss
 
@@ -585,7 +589,7 @@ class AuxGaussIVA(AuxIVAbase):
 
         return output
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "AuxGaussIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
@@ -616,20 +620,20 @@ class AuxGaussIVA(AuxIVAbase):
             E = np.eye(n_sources, n_channels)
             E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
 
-            for source_idx in range(n_sources):
+            for n in range(n_sources):
                 # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-                w_n_Hermite = W[:, source_idx, :] # (n_bins, n_channels)
-                U_n = U[source_idx] # (n_bins, n_channels, n_channels)
+                w_n_Hermite = W[:, n, :] # (n_bins, n_channels)
+                U_n = U[n] # (n_bins, n_channels, n_channels)
                 WU = W @ U_n # (n_bins, n_sources, n_channels)
                 condition = np.linalg.cond(WU) < threshold # (n_bins,)
                 condition = condition[:, np.newaxis] # (n_bins, 1)
-                e_n = E[:, source_idx, :]
+                e_n = E[:, n, :]
                 w_n = np.linalg.solve(WU, e_n)
                 wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
                 denominator = np.sqrt(wUw[..., 0])
                 w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
                 # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
-                W[:, source_idx, :] = w_n_Hermite
+                W[:, n, :] = w_n_Hermite
             
             self.demix_filter = W
 
@@ -725,7 +729,7 @@ class ProxLaplaceIVA(PDSBSSbase):
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "ProxLaplaceIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
@@ -1093,10 +1097,10 @@ if __name__ == '__main__':
     
     print("="*10, "AuxIVA-IP", "="*10)
     print("-"*10, "AuxLaplaceIVA-IP", "-"*10)
-    #_test_aux_iva(method='AuxLaplaceIVA-IP')
+    _test_aux_iva(method='AuxLaplaceIVA-IP')
     print()
     print("-"*10, "AuxGaussIVA-IP", "-"*10)
-    #_test_aux_iva(method='AuxGaussIVA-IP')
+    _test_aux_iva(method='AuxGaussIVA-IP')
     print()
 
     print("="*10, "AuxIVA-ISS", "="*10)
