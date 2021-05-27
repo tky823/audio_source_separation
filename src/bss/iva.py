@@ -1089,16 +1089,16 @@ if __name__ == '__main__':
     _test_conv()
 
     print("="*10, "GradLaplaceIVA", "="*10)
-    #_test_grad_iva(method='GradLaplaceIVA')
+    _test_grad_iva(method='GradLaplaceIVA')
     print()
 
     print("="*10, "NaturalGradLaplaceIVA", "="*10)
-    #_test_grad_iva(method='NaturalGradLaplaceIVA')
+    _test_grad_iva(method='NaturalGradLaplaceIVA')
     print()
     
     print("="*10, "AuxIVA-IP", "="*10)
     print("-"*10, "AuxLaplaceIVA-IP", "-"*10)
-    #_test_aux_iva(method='AuxLaplaceIVA-IP')
+    _test_aux_iva(method='AuxLaplaceIVA-IP')
     print()
     print("-"*10, "AuxGaussIVA-IP", "-"*10)
     _test_aux_iva(method='AuxGaussIVA-IP')
@@ -1106,7 +1106,7 @@ if __name__ == '__main__':
 
     print("="*10, "AuxIVA-ISS", "="*10)
     print("-"*10, "AuxLaplaceIVA-ISS", "-"*10)
-    #_test_aux_iva(method='AuxLaplaceIVA-ISS')
+    _test_aux_iva(method='AuxLaplaceIVA-ISS')
     print()
     print("-"*10, "AuxGaussIVA-ISS", "-"*10)
     _test_aux_iva(method='AuxGaussIVA-ISS')
@@ -1123,13 +1123,13 @@ if __name__ == '__main__':
     """
     
     print("-"*10, "PCA+IVA", "-"*10)
-    #_test_over_iva(method='PCA+IVA')
+    _test_over_iva(method='PCA+IVA')
     print()
 
     print("-"*10, "OverIVA", "-"*10)
-    #_test_over_iva(method='OverIVA')
+    _test_over_iva(method='OverIVA')
     print()
     
     print("="*10, "ProxIVA", "="*10)
     print("-"*10, "ProxLaplaceIVA", "-"*10)
-    #_test_prox_iva(method='ProxLaplaceIVA')
+    _test_prox_iva(method='ProxLaplaceIVA')
