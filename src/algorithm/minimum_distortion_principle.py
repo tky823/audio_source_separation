@@ -13,15 +13,15 @@ def minimum_distortion_principle(Y, reference):
     if n_dims == 2:
         # Y: (n_sources, n_bins, n_frames)
         # X: (1, n_bins, n_frames)
-        X_conj = reference[np.newaxis, :, :].conj()
+        X = reference[np.newaxis, :, :]
     elif n_dims == 3:
         # Y: (n_sources, n_bins, n_frames)
         # X: (n_channels, n_bins, n_frames)
-        X_conj = reference.conj()
+        X = reference
     else:
         raise ValueError("reference.ndim is expected 2 or 3, but given {}.".format(n_dims))
     
-    YX_conj = np.sum(Y[np.newaxis, :, :, :] * X_conj[:, np.newaxis, :, :], axis=3) # (n_channels, n_sources, n_bins)
+    YX_conj = np.sum(Y[np.newaxis, :, :, :].conj() * X[:, np.newaxis, :, :], axis=3) # (n_channels, n_sources, n_bins)
     YY_conj = np.sum(np.abs(Y)**2, axis=2) # (n_sources, n_bins)
     scale = YX_conj / YY_conj # (n_channels, n_sources, n_bins)
 
