@@ -163,6 +163,7 @@ class MultichannelISNMF(MultichannelNMFbase):
 
         n_bases = self.n_bases
         n_sources = self.n_sources
+        eps = self.eps
 
         x = self.input
         n_channels, n_bins, n_frames = x.shape
@@ -177,7 +178,11 @@ class MultichannelISNMF(MultichannelNMFbase):
         self.covariance_input = X.transpose(2, 3, 0, 1)
 
         if not hasattr(self, 'latent'):
-            self.latent = np.ones((n_sources, n_bases), dtype=np.float) / n_sources
+            variance_latent = 1e-2
+            Z = np.random.rand(n_sources, n_bases) * variance_latent + 1 / n_sources
+            Zsum = Z.sum(axis=0)
+            Zsum[Zsum < eps] = eps
+            self.latent = Z / Zsum
         else:
             self.latent = self.latent.copy()
         if not hasattr(self, 'spatial'):
@@ -327,9 +332,7 @@ class MultichannelISNMF(MultichannelNMFbase):
         H = H + eps * np.eye(n_channels)
 
         if self.normalize:
-            # TODO: implement
-            # H = H / np.trace(H, axis1=2, axis2=3)[..., np.newaxis, np.newaxis]
-            raise ValueError("Not support normalize=True.")
+            H = H / np.trace(H, axis1=2, axis2=3)[..., np.newaxis, np.newaxis]
             
         self.spatial = H
     
