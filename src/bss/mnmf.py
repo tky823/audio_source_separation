@@ -127,7 +127,6 @@ class MultichannelISNMF(MultichannelNMFbase):
         assert author.lower() in __authors__, "Choose from {}".format(__authors__)
 
         self.author = author
-        
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -167,7 +166,6 @@ class MultichannelISNMF(MultichannelNMFbase):
 
         x = self.input
         n_channels, n_bins, n_frames = x.shape
-        eps = self.eps
 
         if n_sources is None:
             n_sources = n_channels
@@ -175,15 +173,26 @@ class MultichannelISNMF(MultichannelNMFbase):
         self.n_sources, self.n_channels = n_sources, n_channels
         self.n_bins, self.n_frames = n_bins, n_frames
 
-        Z, H = np.ones((n_sources, n_bases), dtype=np.float) / n_sources, np.eye(n_channels)
         X = x[:, np.newaxis, :, :] * x[np.newaxis, :, :, :].conj()
+        self.covariance_input = X.transpose(2, 3, 0, 1)
 
-        self.spatial = np.tile(H, reps=(n_bins, n_sources, 1, 1))
-        self.latent = Z
-        self.covariance_input = X.transpose(2, 3, 0, 1) # + eps * np.eye(n_channels)
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        if not hasattr(self, 'latent'):
+            self.latent = np.ones((n_sources, n_bases), dtype=np.float) / n_sources
+        else:
+            self.latent = self.latent.copy()
+        if not hasattr(self, 'spatial'):
+            H = np.eye(n_channels)
+            self.spatial = np.tile(H, reps=(n_bins, n_sources, 1, 1))
+        else:
+            self.spatial = self.spatial.copy()
+        if not hasattr(self, 'base'):
+            self.base = np.random.rand(n_bins, n_bases)
+        else:
+            self.base = self.base.copy()
+        if not hasattr(self, 'activation'):
+            self.activation = np.random.rand(n_bases, n_frames)
+        else:
+            self.activation = self.activation.copy()
 
         self.estimation = self.separate(x)
     
@@ -319,8 +328,9 @@ class MultichannelISNMF(MultichannelNMFbase):
 
         if self.normalize:
             # TODO: implement
-            pass
             # H = H / np.trace(H, axis1=2, axis2=3)[..., np.newaxis, np.newaxis]
+            raise ValueError("Not support normalize=True.")
+            
         self.spatial = H
     
     def reconstruct_covariance(self):
