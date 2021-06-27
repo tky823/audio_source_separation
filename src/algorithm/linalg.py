@@ -8,7 +8,7 @@ def solve_Riccati(A, B):
         A (*, M, M): 
         B (*, M, M): 
     """
-    I, N, _, M = A.shape
+    M = A.shape[-1]
     O = np.zeros_like(A)
     L = np.block([
         [O, -A],
@@ -23,7 +23,7 @@ def solve_Riccati(A, B):
     FG = _parallel_sort(v_transposed, order=order, axis=2)
     FG = FG.swapaxes(-1, -2)
 
-    F, G = np.split(FG, M, axis=-2)
+    F, G = np.split(FG, 2, axis=-2)
     H = G @ np.linalg.inv(F)
     H = (H + H.swapaxes(-1, -2).conj()) / 2
 
