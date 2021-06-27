@@ -187,26 +187,6 @@ class MultichannelISNMF(MultichannelNMFbase):
 
         self.estimation = self.separate(x)
     
-    def _parallel_sort(self, x, indices):
-        """
-        Args:
-            x: (n_bins, n_channels, n_dims, n_eigens)
-            indices: (n_bins, n_channels, n_eigens)
-        Returnes:
-            x: (n_bins, n_channels, n_dims, n_eigens)
-        """
-        n_bins, n_channels, n_dims, n_eigens = x.shape
-        x = x.transpose(0, 1, 3, 2)
-        x = x.reshape(n_bins*n_channels*n_eigens, n_dims)
-        indices = indices.reshape(n_bins*n_channels, n_eigens)
-        shift = np.arange(n_bins*n_channels) * n_eigens
-        indices = indices + shift[:, np.newaxis]
-        x = x[indices]
-        x = x.reshape(n_bins, n_channels, n_eigens, n_dims)
-        x = x.transpose(0, 1, 3, 2)
-
-        return x
-    
     def separate(self, input):
         """
         Args:
@@ -338,6 +318,7 @@ class MultichannelISNMF(MultichannelNMFbase):
         H = H + eps * np.eye(n_channels)
 
         if self.normalize:
+            # TODO: implement
             pass
             # H = H / np.trace(H, axis1=2, axis2=3)[..., np.newaxis, np.newaxis]
         self.spatial = H
@@ -705,7 +686,7 @@ def is_divergence(input, target, eps=EPS):
     input, target = input + eps * np.eye(n_channels), target + eps * np.eye(n_channels)
     XX = target @ np.linalg.inv(input)
 
-    loss = np.trace(XX, axis1=-2, axis2=-1).real - np.log(np.linalg.det(XX)).real
+    loss = np.trace(XX, axis1=-2, axis2=-1).real - np.log(np.linalg.det(XX)).real - n_channels
 
     return loss
 
