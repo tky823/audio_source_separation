@@ -99,7 +99,7 @@ class MultichannelNMFbase:
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class MultichannelISNMF(MultichannelNMFbase):
+class ISMultichannelNMF(MultichannelNMFbase):
     """
     References:
         Sawada's MNMF: "Multichannel Extensions of Non-Negative Matrix Factorization With Complex-Valued Data"
@@ -201,6 +201,18 @@ class MultichannelISNMF(MultichannelNMFbase):
 
         self.estimation = self.separate(x)
     
+    def __repr__(self):
+        s = "IS-MNMF("
+        s += "n_bases={n_bases}"
+        if hasattr(self, 'n_sources'):
+            s += ", n_sources={n_sources}"
+        if hasattr(self, 'n_channels'):
+            s += ", n_channels={n_channels}"
+        s += ", normalize={normalize}"
+        s += ")"
+
+        return s.format(**self.__dict__)
+
     def separate(self, input):
         """
         Args:
@@ -233,6 +245,8 @@ class MultichannelISNMF(MultichannelNMFbase):
         return y[reference_id]
     
     def update_once(self):
+        assert self.author.lower() == 'sawada', "Not support other than Sawada's MNMF."
+        
         self.update_base()
         self.update_activation()
         self.update_latent()
@@ -738,7 +752,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
     return mixed_signals
 
-def _test(method, n_bases=10, domain=2, partitioning=False):
+def _test(method, n_bases=10, partitioning=False):
     np.random.seed(111)
     
     # Room impulse response
@@ -765,7 +779,7 @@ def _test(method, n_bases=10, domain=2, partitioning=False):
     iteration = 50
 
     if method == 'Gauss':
-        mnmf = MultichannelISNMF(n_bases=n_bases)
+        mnmf = ISMultichannelNMF(n_bases=n_bases)
     elif method == 'FastGauss':
         mnmf = FastGaussMNMF(n_bases=n_bases)
     else:
@@ -897,7 +911,7 @@ if __name__ == '__main__':
     """
 
     _test_conv()
-    # _test(method='Gauss', n_bases=2, partitioning=False)
+    _test(method='Gauss', n_bases=2, partitioning=False)
     _test(method='FastGauss', n_bases=4, partitioning=False)
     # _test_ilrma(partitioning=False)
     # _test_ilrma(partitioning=True)
