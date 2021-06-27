@@ -68,6 +68,10 @@ class MultichannelNMFbase:
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
 
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
+
         for idx in range(iteration):
             self.update_once()
 
@@ -106,7 +110,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
         Ozerov's MNMF: "Multichannel Nonnegative Matrix Factorization in Convolutive Mixtures for Audio Source Separation"
     See https://ieeexplore.ieee.org/document/6410389 and https://ieeexplore.ieee.org/document/5229304
     """
-    def __init__(self, n_bases=10, n_clusters=2, n_sources=None, normalize=True, callbacks=None, reference_id=0, author='Sawada', eps=EPS):
+    def __init__(self, n_bases=10, n_sources=None, normalize=True, callbacks=None, reference_id=0, author='Sawada', eps=EPS):
         """
         Args:
             n_bases
@@ -141,6 +145,10 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         loss = self.compute_negative_loglikelihood()    
         self.loss.append(loss)
+
+        if self.callbacks is not None:
+            for callback in self.callbacks:
+                callback(self)
 
         for idx in range(iteration):
             self.update_once()
