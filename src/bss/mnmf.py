@@ -377,7 +377,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         return loss
 
-class tMNMF(MultichannelNMFbase):
+class tMultichannelNMF(MultichannelNMFbase):
     """
     Reference: "Student's t multichannel nonnegative matrix factorization for blind source separation"
     See https://ieeexplore.ieee.org/document/7602889
@@ -395,7 +395,7 @@ class tMNMF(MultichannelNMFbase):
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class FastGaussMNMF(MultichannelNMFbase):
+class FastISMultichannelNMF(MultichannelNMFbase):
     """
     Reference: "Fast Multichannel Source Separation Based on Jointly Diagonalizable Spatial Covariance Matrices"
     """
@@ -774,7 +774,7 @@ def _test(method, n_bases=10, partitioning=False):
     titles = ['sample-song/sample3_source3', 'sample-song/sample3_source2']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-    write_wav("data/MNMF/GaussMNMF/partitioning{}/mixture.wav".format(int(partitioning)), signal=mixed_signal.T, sr=sr)
+    write_wav("data/MNMF/{}MNMF/partitioning{}/mixture.wav".format(method, int(partitioning)), signal=mixed_signal.T, sr=sr)
 
     n_sources, T = mixed_signal.shape
     
@@ -786,10 +786,10 @@ def _test(method, n_bases=10, partitioning=False):
     n_channels = len(titles)
     iteration = 50
 
-    if method == 'Gauss':
+    if method == 'IS':
         mnmf = ISMultichannelNMF(n_bases=n_bases)
-    elif method == 'FastGauss':
-        mnmf = FastGaussMNMF(n_bases=n_bases)
+    elif method == 'FastIS':
+        mnmf = FastISMultichannelNMF(n_bases=n_bases)
     else:
         raise ValueError("Not support {}-MNMF.".format(method))
 
@@ -810,74 +810,6 @@ def _test(method, n_bases=10, partitioning=False):
     plt.xlabel('Iteration')
     plt.ylabel('Loss')
     plt.savefig('data/MNMF/{}MNMF/partitioning{}/loss.png'.format(method, int(partitioning)), bbox_inches='tight')
-    plt.close()
-
-def _test_ilrma(partitioning=False):
-    from bss.ilrma import GaussILRMA
-    np.random.seed(111)
-    
-    # Room impulse response
-    sr = 16000
-    reverb = 0.16
-    duration = 0.5
-    samples = int(duration * sr)
-    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
-    mic_indices = [2, 5]
-    degrees = [60, 300]
-    titles = ['sample-song/sample2_source1', 'sample-song/sample2_source2']
-
-    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-    write_wav("data/MNMF/GaussILRMA/partitioning{}/mixture.wav".format(int(partitioning)), signal=mixed_signal.T, sr=sr)
-
-    n_sources, T = mixed_signal.shape
-    
-    # STFT
-    fft_size, hop_size = 2048, 1024
-    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
-    power_spectrogram = np.abs(mixture)**2
-    spectrogram = 10 * np.log10(power_spectrogram + 1e-12)
-    _, f, t = spectrogram.shape
-    t, f = np.arange(t), np.arange(f)
-
-    plt.figure()
-    plt.pcolormesh(t, f, spectrogram[0])
-    plt.savefig("data/MNMF/GaussILRMA/partitioning{}/mixture-spectrogram.png".format(int(partitioning)), bbox_inches='tight')
-    plt.close()
-
-    # ILRMA
-    n_channels = len(titles)
-    iteration = 50
-    if partitioning:
-        n_bases = 5
-    else:
-        n_bases = 2
-
-    ilrma = GaussILRMA(n_bases=n_bases, partitioning=partitioning)
-    estimation = ilrma(mixture, iteration=iteration)
-
-    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
-    
-    print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
-
-    for idx in range(n_channels):
-        _estimated_signal = estimated_signal[idx]
-        write_wav("data/MNMF/GaussILRMA/partitioning{}/mixture-{}_estimated-iter{}-{}.wav".format(int(partitioning), sr, iteration, idx), signal=_estimated_signal, sr=sr)
-
-        power_spectrogram = np.abs(estimation[idx])**2
-        spectrogram = 10 * np.log10(power_spectrogram + 1e-12)
-        f, t = spectrogram.shape
-        t, f = np.arange(t), np.arange(f)
-
-        plt.figure()
-        plt.pcolormesh(t, f, spectrogram)
-        plt.savefig("data/MNMF/GaussILRMA/partitioning{}/mixture-{}_estimated-iter{}-{}.png".format(int(partitioning), sr, iteration, idx), bbox_inches='tight')
-        plt.close()
-    
-    plt.figure()
-    plt.plot(ilrma.loss, color='black')
-    plt.xlabel('Iteration')
-    plt.ylabel('Loss')
-    plt.savefig('data/MNMF/GaussILRMA/partitioning{}/loss.png'.format(int(partitioning)), bbox_inches='tight')
     plt.close()
 
 def _test_conv():
@@ -908,10 +840,8 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/MNMF/GaussMNMF/partitioning0", exist_ok=True)
-    os.makedirs("data/MNMF/GaussILRMA/partitioning0", exist_ok=True)
-    os.makedirs("data/MNMF/GaussILRMA/partitioning1", exist_ok=True)
-    os.makedirs("data/MNMF/FastGaussMNMF/partitioning0", exist_ok=True)
+    os.makedirs("data/MNMF/ISMNMF/partitioning0", exist_ok=True)
+    os.makedirs("data/MNMF/FastISMNMF/partitioning0", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
@@ -919,7 +849,5 @@ if __name__ == '__main__':
     """
 
     _test_conv()
-    _test(method='Gauss', n_bases=2, partitioning=False)
-    _test(method='FastGauss', n_bases=4, partitioning=False)
-    # _test_ilrma(partitioning=False)
-    # _test_ilrma(partitioning=True)
+    _test(method='IS', n_bases=2, partitioning=False)
+    _test(method='FastIS', n_bases=4, partitioning=False)
