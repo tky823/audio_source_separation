@@ -1,5 +1,7 @@
 import numpy as np
-from criterion.divergence import generalized_kl_divergence, is_divergence
+
+from criterion.divergence import generalized_kl_divergence, is_divergence, multichannel_is_divergence
+from algorithm.linalg import solve_Riccati
 
 EPS=1e-12
 
@@ -17,21 +19,31 @@ class NMFbase:
 
         self.eps = eps
     
-    def __call__(self, *args, **kwargs):
-        self.update(*args, **kwargs)
+    def __call__(self, target, iteration=100, **kwargs):
+        self.target = target
+
+        self._reset(**kwargs)
+
+        self.update(iteration=iteration)
+
         T, V = self.base, self.activation
 
         return T.copy(), V.copy()
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
-        eps = self.eps
+    def _reset(self, **kwargs):
+        assert self.target is not None, "Specify data!"
 
-        self.target = target
-        n_bins, n_frames = target.shape
+        for key in kwargs.keys():
+            setattr(self, key, kwargs[key])
+        
+        n_bases = self.n_bases
+        n_bins, n_frames = self.target.shape
 
         self.base = np.random.rand(n_bins, n_bases)
         self.activation = np.random.rand(n_bases, n_frames)
+    
+    def update(self, iteration=100):
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -56,6 +68,31 @@ class ComplexNMFbase:
 
         self.eps = eps
     
+    def __call__(self, target, iteration=100, **kwargs):
+        self.target = target
+
+        self._reset(**kwargs)
+        
+        self.update(iteration=iteration)
+
+        T, V = self.base, self.activation
+        Phi = self.phase
+
+        return T.copy(), V.copy(), Phi.copy()
+    
+    def _reset(self, **kwargs):
+        assert self.target is not None, "Specify data!"
+
+        for key in kwargs.keys():
+            setattr(self, key, kwargs[key])
+        
+        n_bases = self.n_bases
+        n_bins, n_frames = self.target.shape
+
+        self.base = np.random.rand(n_bins, n_bases)
+        self.activation = np.random.rand(n_bases, n_frames)
+        self.phase = 2 * np.pi * np.random.rand(n_bins, n_bases, n_frames)
+
     def init_phase(self):
         n_bases = self.n_bases
         target = self.target
@@ -63,23 +100,8 @@ class ComplexNMFbase:
         phase = np.angle(target)
         self.phase = np.tile(phase[:,np.newaxis,:], reps=(1, n_bases, 1))
     
-    def __call__(self, *args, **kwargs):
-        self.update(*args, **kwargs)
-        T, V = self.base, self.activation
-        Phi = self.phase
-
-        return T.copy(), V.copy(), Phi.copy()
-    
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
-        self.phase = 2 * np.pi * np.random.rand(n_bins, n_bases, n_frames)
+    def update(self, iteration=100):
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -90,6 +112,40 @@ class ComplexNMFbase:
         
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' method")
+
+class MultichannelNMFbase:
+    def __init__(self, n_bases=2, eps=EPS):
+        """
+        Args:
+            n_bases: number of bases 
+        """
+
+        self.n_bases = n_bases
+        self.loss = []
+
+        self.eps = eps
+    
+    def __call__(self, target, iteration=100, **kwargs):
+        self.target = target
+
+        self._reset(**kwargs)
+        
+        self.update(iteration=iteration)
+    
+    def _reset(self, **kwargs):
+        assert self.target is not None, "Specify data!"
+
+        for key in kwargs.keys():
+            setattr(self, key, kwargs[key])
+    
+    def update(self, iteration=100):
+        for idx in range(iteration):
+            self.update_once()
+        
+        raise NotImplementedError("Implement `update` method.")
+    
+    def update_once(self):
+        raise NotImplementedError("Implement `update_once` method.")
 
 class EUCNMF(NMFbase):
     def __init__(self, n_bases=2, domain=2, algorithm='mm', eps=EPS):
@@ -106,16 +162,9 @@ class EUCNMF(NMFbase):
         self.algorithm = algorithm
         self.criterion = lambda input, target: (target - input)**2
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
+    def update(self, iteration=100):
         domain = self.domain
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -172,16 +221,9 @@ class KLNMF(NMFbase):
         self.algorithm = algorithm
         self.criterion = generalized_kl_divergence
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
+    def update(self, iteration=100):
         domain = self.domain
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -238,16 +280,9 @@ class ISNMF(NMFbase):
         self.algorithm = algorithm
         self.criterion = is_divergence
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
+    def update(self, iteration=100):
         domain = self.domain
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -342,16 +377,9 @@ class tNMF(NMFbase):
         self.algorithm = algorithm
         self.criterion = t_divergence
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
+    def update(self, iteration=100):
         domain = self.domain
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -577,18 +605,14 @@ class ComplexEUCNMF(ComplexNMFbase):
         self.criterion = lambda input, target: np.abs(input - target)**2
         self.regularizer, self.p = regularizer, p
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
-        eps = self.eps
-
-        self.target = target
-        F_bin, T_bin = target.shape
-
-        self.base = np.random.rand(F_bin, n_bases)
-        self.activation = np.random.rand(n_bases, T_bin)
+    def _reset(self, **kwargs):
+        super()._reset(**kwargs)
 
         self.init_phase()
         self.update_beta()
+    
+    def update(self, iteration=100):
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -650,6 +674,145 @@ class ComplexEUCNMF(ComplexNMFbase):
         TVsum = TV.sum(axis=1, keepdims=True)
         TVsum[TVsum < eps] = eps
         self.Beta = TV / TVsum
+
+class MultichannelISNMF(MultichannelNMFbase):
+    """
+    Reference: "Multichannel Extensions of Non-Negative Matrix Factorization With Complex-Valued Data"
+    See https://ieeexplore.ieee.org/document/5229304
+    """
+    def __init__(self, n_bases=10, normalize=True, eps=EPS):
+        """
+        Args:
+            n_bases
+            eps <float>: Machine epsilon
+        """
+        super().__init__(n_bases=n_bases, eps=eps)
+
+        self.criterion = multichannel_is_divergence
+        self.normalize = normalize
+    
+    def __call__(self, target, iteration=100, **kwargs):
+        self.target = target
+
+        self._reset(**kwargs)
+
+        self.update(target, iteration=iteration)
+
+        H, T, V = self.spatial, self.base, self.activation
+
+        return H.copy(), T.copy(), V.copy()
+    
+    def _reset(self, **kwargs):
+        super()._reset(**kwargs)
+
+        n_bases = self.n_bases
+        n_bins, n_frames, n_channels, _n_channels = self.target.shape
+
+        assert _n_channels == n_channels, "Invalid input shape"
+
+        self.n_bins, self.n_frames = n_bins, n_frames
+        self.n_channels = n_channels
+    
+        if not hasattr(self, 'spatial'):
+            H = np.eye(n_channels)
+            self.spatial = np.tile(H, reps=(n_bins, n_bases, 1, 1))
+        else:
+            self.spatial = self.spatial.copy()
+        if not hasattr(self, 'base'):
+            self.base = np.random.rand(n_bins, n_bases)
+        else:
+            self.base = self.base.copy()
+        if not hasattr(self, 'activation'):
+            self.activation = np.random.rand(n_bases, n_frames)
+        else:
+            self.activation = self.activation.copy()
+
+    def update(self, target, iteration=100):
+        for idx in range(iteration):
+            self.update_once()
+
+            HTV = self.reconstruct()
+            loss = self.criterion(HTV, target)
+            self.loss.append(loss.sum())
+    
+    def update_once(self):
+        self.update_base()
+        self.update_activation()
+        self.update_spatial()
+    
+    def update_base(self):
+        n_channels = self.n_channels
+        eps = self.eps
+
+        X = self.target # (n_bins, n_frames, n_channels, n_channels)
+        H = self.spatial # (n_bins, n_bases, n_channels, n_channels)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
+
+        X_hat = self.reconstruct()
+        inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
+        XXX = inv_X_hat @ X @ inv_X_hat # (n_bins, n_frames, n_channels, n_channels)
+        
+        numerator = np.trace(XXX[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_bases, 1, n_channels, n_channels) -> (n_bins, n_bases, n_frames)
+        numerator = np.sum(V * numerator, axis=2) # (n_bins, n_bases)
+        denominator = np.trace(inv_X_hat[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_bases, 1, n_channels, n_channels) -> (n_bins, n_bases, n_frames)
+        denominator = np.sum(V * denominator, axis=2) # (n_bins, n_bases, n_bases)
+        denominator[denominator < eps] = eps
+
+        T = T * np.sqrt(numerator / denominator)
+        self.base = T
+
+    def update_activation(self):
+        n_channels = self.n_channels
+        eps = self.eps
+
+        X = self.target # (n_bins, n_frames, n_channels, n_channels)
+        H = self.spatial # (n_bins, n_bases, n_channels, n_channels)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
+
+        X_hat = self.reconstruct()
+        inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
+        XXX = inv_X_hat @ X @ inv_X_hat # (n_bins, n_frames, n_channels, n_channels)
+
+        numerator = np.trace(XXX[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_bases, 1, n_channels, n_channels) -> (n_bins, n_bases, n_frames)
+        numerator = np.sum(T[:, :, np.newaxis] * numerator, axis=0) # (n_bases, n_frames)
+        denominator = np.trace(inv_X_hat[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_bases, 1, n_channels, n_channels) -> (n_bins, n_bases, n_frames)
+        denominator = np.sum(T[:, :, np.newaxis] * denominator, axis=0) # (n_bases, n_frames)
+        denominator[denominator < eps] = eps
+
+        V = V * np.sqrt(numerator / denominator)
+        self.activation = V
+    
+    def update_spatial(self):
+        n_channels = self.n_channels
+        eps = self.eps
+
+        X = self.target # (n_bins, n_frames, n_channels, n_channels)
+        H = self.spatial # (n_bins, n_bases, n_channels, n_channels)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
+
+        X_hat = self.reconstruct()
+        inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
+        XXX = inv_X_hat @ X @ inv_X_hat # (n_bins, n_frames, n_channels, n_channels)
+        VXXX = np.sum(V[np.newaxis, :, :, np.newaxis, np.newaxis] * XXX[:, np.newaxis, :, :, :], axis=2) # (n_bins, n_bases, n_channels, n_channels)
+        
+        A = np.sum(V[np.newaxis, :, :, np.newaxis, np.newaxis] * inv_X_hat[:, np.newaxis, :, :, :], axis=2) # (n_bins, bases, n_channels, n_channels)
+        B = H @ VXXX @ H
+        H = solve_Riccati(A, B)
+        H = H + eps * np.eye(n_channels)
+
+        if self.normalize:
+            H = H / np.trace(H, axis1=2, axis2=3)[..., np.newaxis, np.newaxis]
+            
+        self.spatial = H
+    
+    def reconstruct(self):
+        H = self.spatial # (n_bins, n_bases, n_channels, n_channels)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
+
+        TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
+        X_hat = np.sum(H[:, :, np.newaxis, :, :] * TV[:, :, :, np.newaxis, np.newaxis], axis=1) # (n_bins, n_frames, n_channels, n_channels)
+        
+        return X_hat
 
 """
     TODO

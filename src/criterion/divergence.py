@@ -59,3 +59,23 @@ def beta_divergence(input, target, beta=2):
     loss = target * (target**beta_minus1 - input**beta_minus1) / beta_minus1 - (target**beta - input**beta) / beta
     
     return loss
+
+def multichannel_is_divergence(input, target, eps=EPS):
+    """
+    Multichannel Itakura-Saito divergence
+    Args:
+        input (*, n_channels, n_channels)
+        target (*, n_channels, n_channels)
+    Returns:
+        loss (*)
+    """
+    shape_input, shape_target = input.shape, target.shape
+    assert shape_input[-2] == shape_input[-1] and shape_target[-2] == shape_target[-1], "Invalid input shape"
+    n_channels = shape_input[-1]
+    
+    input, target = input + eps * np.eye(n_channels), target + eps * np.eye(n_channels)
+    XX = target @ np.linalg.inv(input)
+
+    loss = np.trace(XX, axis1=-2, axis2=-1).real - np.log(np.linalg.det(XX).real) - n_channels
+
+    return loss

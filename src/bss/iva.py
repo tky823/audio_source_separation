@@ -82,7 +82,7 @@ class IVAbase:
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "IVA("
         s += ")"
 
@@ -169,7 +169,7 @@ class GradIVAbase(IVAbase):
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "GradIVA("
         s += "lr={lr}"
         s += ")"
@@ -186,7 +186,7 @@ class GradLaplaceIVA(GradIVAbase):
     def __init__(self, lr=1e-1, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
         super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps)
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "NaturalGradIVA("
         s += "lr={lr}"
         s += ")"
@@ -229,12 +229,11 @@ class GradLaplaceIVA(GradIVAbase):
 
         return loss
 
-
 class NaturalGradLaplaceIVA(GradIVAbase):
     def __init__(self, lr=1e-1, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
         super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps)
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "NaturalGradLaplaceIVA("
         s += "lr={lr}"
         s += ")"
@@ -276,7 +275,6 @@ class NaturalGradLaplaceIVA(GradIVAbase):
 
         return loss
 
-
 class AuxIVAbase(IVAbase):
     """
     References:
@@ -284,6 +282,7 @@ class AuxIVAbase(IVAbase):
         "Auxiliary-function-based Independent Vector Analysis with Power of Vector-norm Type Weighting Functions"
         "Fast and Stable Blind Source Separation with Rank-1 Updates"
         "Independent Vector Analysis via Log-Quadratically Penalized Quadratic Minimization"
+        "Independent Vector Analysis with more Microphones than Sources"
     """
     def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         super().__init__(callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
@@ -337,7 +336,13 @@ class AuxIVAbase(IVAbase):
 
         return output
     
-    def __repr__(self) -> str:
+    def _reset(self, **kwargs):
+        super()._reset(**kwargs)
+
+        if self.algorithm_spatial == 'ISS':
+            self.demix_filter = None
+    
+    def __repr__(self):
         s = "AuxIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
@@ -349,7 +354,6 @@ class AuxIVAbase(IVAbase):
 
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
-
 
 class AuxLaplaceIVA(AuxIVAbase):
     def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
@@ -377,8 +381,13 @@ class AuxLaplaceIVA(AuxIVAbase):
                 X, Y = self.input, self.estimation
                 self.demix_filter = self.compute_demix_filter(Y, X)
             
-            for callback in self.callbacks:
-                callback(self)
+                for callback in self.callbacks:
+                    callback(self)
+                
+                self.demix_filter = None
+            else:
+                for callback in self.callbacks:
+                    callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -394,22 +403,34 @@ class AuxLaplaceIVA(AuxIVAbase):
                     X, Y = self.input, self.estimation
                     self.demix_filter = self.compute_demix_filter(Y, X)
                 
-                for callback in self.callbacks:
-                    callback(self)
+                    for callback in self.callbacks:
+                        callback(self)
+                    
+                    self.demix_filter = None
+                else:
+                    for callback in self.callbacks:
+                        callback(self)
 
         reference_id = self.reference_id
-        X, W = input, self.demix_filter
-        output = self.separate(X, demix_filter=W)
+
+        if self.algorithm_spatial == 'ISS':
+            X, Y = self.input, self.estimation
+            self.demix_filter = self.compute_demix_filter(Y, X)
+        else:
+            X, W = input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
+        
+        output = Y
 
         if self.apply_projection_back:
             scale = projection_back(output, reference=X[reference_id])
-            output = output * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+            output = output * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
         
         self.estimation = output
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "AuxLaplaceIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
@@ -422,43 +443,45 @@ class AuxLaplaceIVA(AuxIVAbase):
         eps, threshold = self.eps, self.threshold
 
         X, Y = self.input, self.estimation
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        R = np.sqrt(P.sum(axis=1)) # (n_sources, n_frames)
 
         if self.algorithm_spatial == 'IP':
             W = self.demix_filter
-            X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
-            X = X[...,np.newaxis]
-            X_Hermite = X.transpose(0,1,3,2).conj()
+            R = R[:, np.newaxis, :, np.newaxis, np.newaxis] # (n_sources, 1, n_frames, 1, 1)
+
+            X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+            X = X[..., np.newaxis]
+            X_Hermite = X.transpose(0, 1, 3, 2).conj()
             XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
-            P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
-            R = np.sqrt(P.sum(axis=1))[:,np.newaxis,:,np.newaxis,np.newaxis] # (n_sources, 1, n_frames, 1, 1)
             R[R < eps] = eps
             U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
             U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
             E = np.eye(n_sources, n_channels)
-            E = np.tile(E, reps=(n_bins,1,1)) # (n_bins, n_sources, n_channels)
+            E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
 
-            for source_idx in range(n_sources):
+            for n in range(n_sources):
                 # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-                w_n_Hermite = W[:,source_idx,:] # (n_bins, n_channels)
-                U_n = U[source_idx] # (n_bins, n_channels, n_channels)
+                w_n_Hermite = W[:, n, :] # (n_bins, n_channels)
+                U_n = U[n] # (n_bins, n_channels, n_channels)
                 WU = W @ U_n # (n_bins, n_sources, n_channels)
                 condition = np.linalg.cond(WU) < threshold # (n_bins,)
-                condition = condition[:,np.newaxis] # (n_bins, 1)
-                e_n = E[:,source_idx,:]
+                condition = condition[:, np.newaxis] # (n_bins, 1)
+                e_n = E[:, n, :]
                 w_n = np.linalg.solve(WU, e_n)
-                wUw = w_n[:,np.newaxis,:].conj() @ U_n @ w_n[:,:,np.newaxis]
-                denominator = np.sqrt(wUw[...,0])
+                wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
+                denominator = np.sqrt(wUw[..., 0])
                 w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
                 # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
-                W[:,source_idx,:] = w_n_Hermite
+                W[:, n, :] = w_n_Hermite
             
             self.demix_filter = W
 
             X = self.input
             Y = self.separate(X, demix_filter=W)
         elif self.algorithm_spatial == 'ISS':
-            P = np.sum(np.abs(Y)**2, axis=1) # (n_sources, n_frames)
-            R = 2 * np.sqrt(P) # (n_sources, n_frames)
+            P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+            R = np.sqrt(P.sum(axis=1)) # (n_sources, n_frames)
             R[R < eps] = eps
 
             for n in range(n_sources):
@@ -467,11 +490,7 @@ class AuxLaplaceIVA(AuxIVAbase):
                 V_n = U_n / D_n # (n_sources, n_bins)
                 V_n[n] = 1 - 1 / np.sqrt(D_n[n])
                 Y = Y - V_n[:, :, np.newaxis] * Y[n]
-            
-            if self.recordable_loss:
-                # In `update_once()`, demix_filter isn't updated ordinally
-                # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
-                self.demix_filter = self.compute_demix_filter(Y, X)
+        
         elif self.algorithm_spatial == 'IPA':
             raise ValueError("in progress...")
         else:
@@ -480,11 +499,19 @@ class AuxLaplaceIVA(AuxIVAbase):
         self.estimation = Y
     
     def compute_negative_loglikelihood(self):
-        X, W = self.input, self.demix_filter
-        Y = self.separate(X, demix_filter=W)
+        n_frames = self.n_frames
+
+        X = self.input
+        if self.demix_filter is None:
+            Y = self.estimation
+            W = self.compute_demix_filter(Y, X)
+        else:
+            W = self.demix_filter
+            Y = self.separate(X, demix_filter=W)
+        
         P = np.sum(np.abs(Y)**2, axis=1)
         R = 2 * np.sqrt(P)
-        loss = np.sum(R, axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+        loss = R.sum() - 2 * n_frames * np.log(np.abs(np.linalg.det(W))).sum()
 
         return loss
 
@@ -513,9 +540,13 @@ class AuxGaussIVA(AuxIVAbase):
                 # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                 X, Y = self.input, self.estimation
                 self.demix_filter = self.compute_demix_filter(Y, X)
-            
-            for callback in self.callbacks:
-                callback(self)
+
+                for callback in self.callbacks:
+                    callback(self)
+                self.demix_filter = None
+            else:    
+                for callback in self.callbacks:
+                    callback(self)
 
         for idx in range(iteration):
             self.update_once()
@@ -530,23 +561,35 @@ class AuxGaussIVA(AuxIVAbase):
                     # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                     X, Y = self.input, self.estimation
                     self.demix_filter = self.compute_demix_filter(Y, X)
-                
-                for callback in self.callbacks:
-                    callback(self)
+
+                    for callback in self.callbacks:
+                        callback(self)
+                    
+                    self.demix_filter = None
+                else:    
+                    for callback in self.callbacks:
+                        callback(self)
 
         reference_id = self.reference_id
-        X, W = input, self.demix_filter
-        output = self.separate(X, demix_filter=W)
+
+        if self.algorithm_spatial == 'ISS':
+            X, Y = self.input, self.estimation
+            self.demix_filter = self.compute_demix_filter(Y, X)
+        else:
+            X, W = input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
+        
+        output = Y
 
         if self.apply_projection_back:
             scale = projection_back(output, reference=X[reference_id])
-            output = output * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+            output = output * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
         
         self.estimation = output
 
         return output
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "AuxGaussIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
@@ -560,41 +603,43 @@ class AuxGaussIVA(AuxIVAbase):
 
         X, Y = self.input, self.estimation
 
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        R = P.mean(axis=1) # (n_sources, n_frames)
+
         if self.algorithm_spatial == 'IP':
             W = self.demix_filter
-            X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
-            X = X[...,np.newaxis]
-            X_Hermite = X.transpose(0,1,3,2).conj()
+            R = R[:, np.newaxis, :, np.newaxis, np.newaxis] # (n_sources, 1, n_frames, 1, 1)
+
+            X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+            X = X[..., np.newaxis]
+            X_Hermite = X.transpose(0, 1, 3, 2).conj()
             XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
-            P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
-            R = P.mean(axis=1)[:,np.newaxis,:,np.newaxis,np.newaxis] # (n_sources, 1, n_frames, 1, 1)
             R[R < eps] = eps
             U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
             U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
             E = np.eye(n_sources, n_channels)
-            E = np.tile(E, reps=(n_bins,1,1)) # (n_bins, n_sources, n_channels)
-            for source_idx in range(n_sources):
+            E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
+
+            for n in range(n_sources):
                 # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-                w_n_Hermite = W[:,source_idx,:] # (n_bins, n_channels)
-                U_n = U[source_idx] # (n_bins, n_channels, n_channels)
+                w_n_Hermite = W[:, n, :] # (n_bins, n_channels)
+                U_n = U[n] # (n_bins, n_channels, n_channels)
                 WU = W @ U_n # (n_bins, n_sources, n_channels)
                 condition = np.linalg.cond(WU) < threshold # (n_bins,)
-                condition = condition[:,np.newaxis] # (n_bins, 1)
-                e_n = E[:,source_idx,:]
+                condition = condition[:, np.newaxis] # (n_bins, 1)
+                e_n = E[:, n, :]
                 w_n = np.linalg.solve(WU, e_n)
-                wUw = w_n[:,np.newaxis,:].conj() @ U_n @ w_n[:,:,np.newaxis]
-                denominator = np.sqrt(wUw[...,0])
+                wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
+                denominator = np.sqrt(wUw[..., 0])
                 w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
                 # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
-                W[:,source_idx,:] = w_n_Hermite
+                W[:, n, :] = w_n_Hermite
             
             self.demix_filter = W
 
             X = self.input
             Y = self.separate(X, demix_filter=W)
         elif self.algorithm_spatial == 'ISS':
-            P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
-            R = P.mean(axis=1) # (n_sources, n_frames)
             R[R < eps] = eps
 
             for n in range(n_sources):
@@ -603,25 +648,29 @@ class AuxGaussIVA(AuxIVAbase):
                 V_n = U_n / D_n # (n_sources, n_bins)
                 V_n[n] = 1 - 1 / np.sqrt(D_n[n])
                 Y = Y - V_n[:, :, np.newaxis] * Y[n]
-            
-            if self.recordable_loss:
-                # In `update_once()`, demix_filter isn't updated ordinally
-                # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
-                self.demix_filter = self.compute_demix_filter(Y, X)
         else:
             raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
         
         self.estimation = Y
     
     def compute_negative_loglikelihood(self):
-        X, W = self.input, self.demix_filter
-        n_bins = self.n_bins
+        X = self.input
+
+        if self.demix_filter is None:
+            Y = self.estimation
+            W = self.compute_demix_filter(Y, X)
+        else:
+            W = self.demix_filter
+            Y = self.separate(X, demix_filter=W)
+        
+        n_bins, n_frames = self.n_bins, self.n_frames
         eps = self.eps
+
         Y = self.separate(X, demix_filter=W)
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
         R = P.mean(axis=1) # (n_sources, n_frames)
         R[R < eps] = eps
-        loss = (2 * n_bins) * np.sum(np.log(R), axis=0).mean() - 2 * np.log(np.abs(np.linalg.det(W))).sum()
+        loss = n_bins * np.sum(np.log(R)) - 2 * n_frames * np.log(np.abs(np.linalg.det(W))).sum()
 
         return loss
 
@@ -638,9 +687,15 @@ class SparseAuxIVA(AuxIVAbase):
     def update_once(self):
         raise NotImplementedError("in progress...")
 
-class OverIVAbase(AuxIVAbase):
-    def __init__(self, algorithm_spatial, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+class OverAuxIVAbase(AuxIVAbase):
+    def __init__(self, algorithm_spatial, n_sources=None, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+
+        self.n_sources = n_sources
+
+class OverAuxLaplaceIVA(OverAuxIVAbase):
+    def __init__(self, algorithm_spatial, n_sources=None, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(algorithm_spatial=algorithm_spatial, n_sources=n_sources, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
 
     def __call__(self, input, iteration=100, **kwargs):
 
@@ -669,13 +724,13 @@ class ProxLaplaceIVA(PDSBSSbase):
 
         if self.apply_projection_back:
             scale = projection_back(output, reference=X[reference_id])
-            output = output * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+            output = output * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
         
         self.estimation = output
 
         return output
     
-    def __repr__(self) -> str:
+    def __repr__(self):
         s = "ProxLaplaceIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
@@ -781,6 +836,7 @@ def _test_aux_iva(method='AuxLaplaceIVA'):
     mic_indices = [2, 5]
     degrees = [60, 300]
     titles = ['man-16000', 'woman-16000']
+    # titles = ['sample-song/sample2_source1', 'sample-song/sample2_source2']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
     
@@ -879,7 +935,7 @@ def _test_grad_iva(method='GradLaplaceIVA'):
     plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
 
-def _test_over_iva(method='ProxLaplaceIVA'):
+def _test_over_iva(method='OverAuxLaplaceIVA'):
     from transform.pca import pca
     from algorithm.projection_back import projection_back
 
@@ -918,7 +974,7 @@ def _test_over_iva(method='ProxLaplaceIVA'):
 
         scale = projection_back(estimation, mixture[reference_id])
         estimation = estimation * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
-    elif method == 'OverIVA':
+    elif method == 'OverAuxLaplaceIVA':
         raise ValueError("Not support method {}".format(method))
     else:
         raise ValueError("Not support method {}".format(method))
@@ -937,7 +993,6 @@ def _test_over_iva(method='ProxLaplaceIVA'):
     plt.ylabel('Loss')
     plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
-
 
 def _test_prox_iva(method='ProxLaplaceIVA'):
     np.random.seed(111)
