@@ -3,6 +3,7 @@ import warnings
 import numpy as np
 
 from algorithm.linalg import solve_Riccati
+from criterion.divergence import multichannel_is_divergence
 
 EPS=1e-12
 THRESHOLD=1e+12
@@ -112,7 +113,7 @@ class MultichannelNMFbase:
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class ISMultichannelNMF(MultichannelNMFbase):
+class MultichannelISNMF(MultichannelNMFbase):
     """
     References:
         Sawada's MNMF: "Multichannel Extensions of Non-Negative Matrix Factorization With Complex-Valued Data"
@@ -395,12 +396,12 @@ class ISMultichannelNMF(MultichannelNMFbase):
         X = self.covariance_input # (n_bins, n_frames, n_channels, n_channels)
         X_hat = self.reconstruct_covariance()
         
-        loss = is_divergence(X_hat, X) # (n_bins, n_frames)
+        loss = multichannel_is_divergence(X_hat, X) # (n_bins, n_frames)
         loss = loss.sum()
 
         return loss
 
-class tMultichannelNMF(MultichannelNMFbase):
+class MultichanneltNMF(MultichannelNMFbase):
     """
     Reference: "Student's t multichannel nonnegative matrix factorization for blind source separation"
     See https://ieeexplore.ieee.org/document/7602889
@@ -418,7 +419,7 @@ class tMultichannelNMF(MultichannelNMFbase):
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class FastISMultichannelNMF(MultichannelNMFbase):
+class FastMultichannelISNMF(MultichannelNMFbase):
     """
     Reference: "Fast Multichannel Source Separation Based on Jointly Diagonalizable Spatial Covariance Matrices"
     """
@@ -729,24 +730,6 @@ class FastISMultichannelNMF(MultichannelNMFbase):
         
         return x_hat[:, reference_id, :, :]
 
-def is_divergence(input, target, eps=EPS):
-    """
-    Multichannel Itakura-Saito divergence
-    Args:
-        input (*, n_channels, n_channels)
-        target (*, n_channels, n_channels)
-    """
-    shape_input, shape_target = input.shape, target.shape
-    assert shape_input[-2] == shape_input[-1] and shape_target[-2] == shape_target[-1], "Invalid input shape"
-    n_channels = shape_input[-1]
-    
-    input, target = input + eps * np.eye(n_channels), target + eps * np.eye(n_channels)
-    XX = target @ np.linalg.inv(input)
-
-    loss = np.trace(XX, axis1=-2, axis2=-1).real - np.log(np.linalg.det(XX)).real - n_channels
-
-    return loss
-
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
 
@@ -809,9 +792,9 @@ def _test(method, n_bases=10, partitioning=False):
     iteration = 50
 
     if method == 'IS':
-        mnmf = ISMultichannelNMF(n_bases=n_bases)
+        mnmf = MultichannelISNMF(n_bases=n_bases)
     elif method == 'FastIS':
-        mnmf = FastISMultichannelNMF(n_bases=n_bases)
+        mnmf = FastMultichannelISNMF(n_bases=n_bases)
     else:
         raise ValueError("Not support {}-MNMF.".format(method))
 
