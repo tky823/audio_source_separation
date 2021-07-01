@@ -3,6 +3,7 @@ import warnings
 import numpy as np
 
 from algorithm.linalg import solve_Riccati
+from criterion.divergence import multichannel_is_divergence
 
 EPS=1e-12
 THRESHOLD=1e+12
@@ -21,7 +22,7 @@ __kwargs_sawada_mnmf___ = {
 """
 
 class MultichannelNMFbase:
-    def __init__(self, n_bases=10, n_sources=None, callbacks=None, eps=EPS):
+    def __init__(self, n_bases=10, n_sources=None, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             n_bases: number of bases 
@@ -32,10 +33,17 @@ class MultichannelNMFbase:
             self.callbacks = callbacks
         else:
             self.callbacks = None
+
         self.eps = eps
-        self.input = None
         self.n_bases = n_bases
         self.n_sources = n_sources
+
+        self.input = None
+        self.recordable_loss = recordable_loss
+        if self.recordable_loss:
+            self.loss = []
+        else:
+            self.loss = None
         self.loss = []
     
     def _reset(self, **kwargs):
@@ -65,8 +73,9 @@ class MultichannelNMFbase:
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()    
-        self.loss.append(loss)
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
 
         if self.callbacks is not None:
             for callback in self.callbacks:
@@ -75,8 +84,9 @@ class MultichannelNMFbase:
         for idx in range(iteration):
             self.update_once()
 
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
 
             if self.callbacks is not None:
                 for callback in self.callbacks:
@@ -103,18 +113,17 @@ class MultichannelNMFbase:
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class ISMultichannelNMF(MultichannelNMFbase):
+class MultichannelISNMF(MultichannelNMFbase):
     """
     References:
         Sawada's MNMF: "Multichannel Extensions of Non-Negative Matrix Factorization With Complex-Valued Data"
         Ozerov's MNMF: "Multichannel Nonnegative Matrix Factorization in Convolutive Mixtures for Audio Source Separation"
     See https://ieeexplore.ieee.org/document/6410389 and https://ieeexplore.ieee.org/document/5229304
     """
-    def __init__(self, n_bases=10, n_sources=None, normalize=True, callbacks=None, reference_id=0, author='Sawada', eps=EPS):
+    def __init__(self, n_bases=10, n_sources=None, normalize=True, callbacks=None, reference_id=0, author='Sawada', recordable_loss=True, eps=EPS):
         """
         Args:
             n_bases
-            n_clusters
             n_sources
             normalize
             callbacks <callable> or <list<callable>>: Callback function. Default: None
@@ -122,7 +131,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
             author <str>: 'Sawada' or 'Ozerov'
             eps <float>: Machine epsilon
         """
-        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, eps=eps)
+        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.normalize = normalize
 
@@ -143,8 +152,9 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()    
-        self.loss.append(loss)
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
 
         if self.callbacks is not None:
             for callback in self.callbacks:
@@ -153,8 +163,9 @@ class ISMultichannelNMF(MultichannelNMFbase):
         for idx in range(iteration):
             self.update_once()
 
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
 
             if self.callbacks is not None:
                 for callback in self.callbacks:
@@ -230,7 +241,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
         """
         x = input
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         n_channels = self.n_channels
         reference_id = self.reference_id
@@ -253,12 +264,25 @@ class ISMultichannelNMF(MultichannelNMFbase):
         return y[reference_id]
     
     def update_once(self):
-        assert self.author.lower() == 'sawada', "Not support other than Sawada's MNMF."
+        author = self.author.lower()
+        if author == 'sawada':
+            self.update_once_sawada()
+        elif author == 'ozerov':
+            self.update_once_ozerov()
+        else:
+            raise ValueError("Not support {}'s MNMF.".format(self.author))
         
+        X = self.input
+        self.estimation = self.separate(X)
+    
+    def update_once_sawada(self):
         self.update_base()
         self.update_activation()
         self.update_latent()
         self.update_spatial()
+    
+    def update_once_ozerov(self):
+        raise ValueError("Not support {}'s MNMF.".format(self.author))
     
     def update_base(self):
         n_channels = self.n_channels
@@ -266,7 +290,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         X = self.covariance_input # + eps * np.eye(n_channels) # (n_bins, n_frames, n_channels, n_channels)
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         X_hat = self.reconstruct_covariance()
         inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
@@ -289,7 +313,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         X = self.covariance_input # + eps * np.eye(n_channels) # (n_bins, n_frames, n_channels, n_channels)
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         X_hat = self.reconstruct_covariance()
         inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
@@ -312,7 +336,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         X = self.covariance_input # + eps * np.eye(n_channels) # (n_bins, n_frames, n_channels, n_channels)
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         X_hat = self.reconstruct_covariance()
         TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
@@ -338,7 +362,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         X = self.covariance_input # + eps * np.eye(n_channels) # (n_bins, n_frames, n_channels, n_channels)
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         X_hat = self.reconstruct_covariance()
         inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
@@ -360,7 +384,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
     
     def reconstruct_covariance(self):
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         HZ = np.sum(H[:, :, np.newaxis, :, :] * Z[np.newaxis, :, :, np.newaxis, np.newaxis], axis=1) # (n_bins, n_bases, n_channels, n_channels)
         TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
@@ -372,30 +396,30 @@ class ISMultichannelNMF(MultichannelNMFbase):
         X = self.covariance_input # (n_bins, n_frames, n_channels, n_channels)
         X_hat = self.reconstruct_covariance()
         
-        loss = is_divergence(X_hat, X) # (n_bins, n_frames)
+        loss = multichannel_is_divergence(X_hat, X) # (n_bins, n_frames)
         loss = loss.sum()
 
         return loss
 
-class tMNMF(MultichannelNMFbase):
+class MultichanneltNMF(MultichannelNMFbase):
     """
     Reference: "Student's t multichannel nonnegative matrix factorization for blind source separation"
     See https://ieeexplore.ieee.org/document/7602889
     """
-    def __init__(self, n_bases=10, n_sources=None, reference_id=0, callbacks=None, eps=EPS):
+    def __init__(self, n_bases=10, n_sources=None, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
         """
         warnings.warn("in progress", UserWarning)
 
-        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, eps=eps)
+        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
     
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
-class FastGaussMNMF(MultichannelNMFbase):
+class FastMultichannelISNMF(MultichannelNMFbase):
     """
     Reference: "Fast Multichannel Source Separation Based on Jointly Diagonalizable Spatial Covariance Matrices"
     """
@@ -403,13 +427,12 @@ class FastGaussMNMF(MultichannelNMFbase):
         """
         Args:
         """
-        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, eps=eps)
+        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.partitioning = partitioning
         self.normalize = normalize
         self.reference_id = reference_id
 
-        self.recordable_loss = recordable_loss
         self.threshold = threshold
 
     def _reset(self, **kwargs):
@@ -707,24 +730,6 @@ class FastGaussMNMF(MultichannelNMFbase):
         
         return x_hat[:, reference_id, :, :]
 
-def is_divergence(input, target, eps=EPS):
-    """
-    Multichannel Itakura-Saito divergence
-    Args:
-        input (*, n_channels, n_channels)
-        target (*, n_channels, n_channels)
-    """
-    shape_input, shape_target = input.shape, target.shape
-    assert shape_input[-2] == shape_input[-1] and shape_target[-2] == shape_target[-1], "Invalid input shape"
-    n_channels = shape_input[-1]
-    
-    input, target = input + eps * np.eye(n_channels), target + eps * np.eye(n_channels)
-    XX = target @ np.linalg.inv(input)
-
-    loss = np.trace(XX, axis1=-2, axis2=-1).real - np.log(np.linalg.det(XX)).real - n_channels
-
-    return loss
-
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
 
@@ -774,7 +779,7 @@ def _test(method, n_bases=10, partitioning=False):
     titles = ['sample-song/sample3_source3', 'sample-song/sample3_source2']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-    write_wav("data/MNMF/GaussMNMF/partitioning{}/mixture.wav".format(int(partitioning)), signal=mixed_signal.T, sr=sr)
+    write_wav("data/MNMF/{}MNMF/partitioning{}/mixture.wav".format(method, int(partitioning)), signal=mixed_signal.T, sr=sr)
 
     n_sources, T = mixed_signal.shape
     
@@ -786,10 +791,10 @@ def _test(method, n_bases=10, partitioning=False):
     n_channels = len(titles)
     iteration = 50
 
-    if method == 'Gauss':
-        mnmf = ISMultichannelNMF(n_bases=n_bases)
-    elif method == 'FastGauss':
-        mnmf = FastGaussMNMF(n_bases=n_bases)
+    if method == 'IS':
+        mnmf = MultichannelISNMF(n_bases=n_bases)
+    elif method == 'FastIS':
+        mnmf = FastMultichannelISNMF(n_bases=n_bases)
     else:
         raise ValueError("Not support {}-MNMF.".format(method))
 
@@ -810,74 +815,6 @@ def _test(method, n_bases=10, partitioning=False):
     plt.xlabel('Iteration')
     plt.ylabel('Loss')
     plt.savefig('data/MNMF/{}MNMF/partitioning{}/loss.png'.format(method, int(partitioning)), bbox_inches='tight')
-    plt.close()
-
-def _test_ilrma(partitioning=False):
-    from bss.ilrma import GaussILRMA
-    np.random.seed(111)
-    
-    # Room impulse response
-    sr = 16000
-    reverb = 0.16
-    duration = 0.5
-    samples = int(duration * sr)
-    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
-    mic_indices = [2, 5]
-    degrees = [60, 300]
-    titles = ['sample-song/sample2_source1', 'sample-song/sample2_source2']
-
-    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-    write_wav("data/MNMF/GaussILRMA/partitioning{}/mixture.wav".format(int(partitioning)), signal=mixed_signal.T, sr=sr)
-
-    n_sources, T = mixed_signal.shape
-    
-    # STFT
-    fft_size, hop_size = 2048, 1024
-    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
-    power_spectrogram = np.abs(mixture)**2
-    spectrogram = 10 * np.log10(power_spectrogram + 1e-12)
-    _, f, t = spectrogram.shape
-    t, f = np.arange(t), np.arange(f)
-
-    plt.figure()
-    plt.pcolormesh(t, f, spectrogram[0])
-    plt.savefig("data/MNMF/GaussILRMA/partitioning{}/mixture-spectrogram.png".format(int(partitioning)), bbox_inches='tight')
-    plt.close()
-
-    # ILRMA
-    n_channels = len(titles)
-    iteration = 50
-    if partitioning:
-        n_bases = 5
-    else:
-        n_bases = 2
-
-    ilrma = GaussILRMA(n_bases=n_bases, partitioning=partitioning)
-    estimation = ilrma(mixture, iteration=iteration)
-
-    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
-    
-    print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
-
-    for idx in range(n_channels):
-        _estimated_signal = estimated_signal[idx]
-        write_wav("data/MNMF/GaussILRMA/partitioning{}/mixture-{}_estimated-iter{}-{}.wav".format(int(partitioning), sr, iteration, idx), signal=_estimated_signal, sr=sr)
-
-        power_spectrogram = np.abs(estimation[idx])**2
-        spectrogram = 10 * np.log10(power_spectrogram + 1e-12)
-        f, t = spectrogram.shape
-        t, f = np.arange(t), np.arange(f)
-
-        plt.figure()
-        plt.pcolormesh(t, f, spectrogram)
-        plt.savefig("data/MNMF/GaussILRMA/partitioning{}/mixture-{}_estimated-iter{}-{}.png".format(int(partitioning), sr, iteration, idx), bbox_inches='tight')
-        plt.close()
-    
-    plt.figure()
-    plt.plot(ilrma.loss, color='black')
-    plt.xlabel('Iteration')
-    plt.ylabel('Loss')
-    plt.savefig('data/MNMF/GaussILRMA/partitioning{}/loss.png'.format(int(partitioning)), bbox_inches='tight')
     plt.close()
 
 def _test_conv():
@@ -908,10 +845,8 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/MNMF/GaussMNMF/partitioning0", exist_ok=True)
-    os.makedirs("data/MNMF/GaussILRMA/partitioning0", exist_ok=True)
-    os.makedirs("data/MNMF/GaussILRMA/partitioning1", exist_ok=True)
-    os.makedirs("data/MNMF/FastGaussMNMF/partitioning0", exist_ok=True)
+    os.makedirs("data/MNMF/ISMNMF/partitioning0", exist_ok=True)
+    os.makedirs("data/MNMF/FastISMNMF/partitioning0", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
@@ -919,7 +854,5 @@ if __name__ == '__main__':
     """
 
     _test_conv()
-    _test(method='Gauss', n_bases=2, partitioning=False)
-    _test(method='FastGauss', n_bases=4, partitioning=False)
-    # _test_ilrma(partitioning=False)
-    # _test_ilrma(partitioning=True)
+    _test(method='IS', n_bases=2, partitioning=False)
+    _test(method='FastIS', n_bases=4, partitioning=False)
