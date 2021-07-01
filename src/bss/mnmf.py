@@ -123,7 +123,6 @@ class ISMultichannelNMF(MultichannelNMFbase):
         """
         Args:
             n_bases
-            n_clusters
             n_sources
             normalize
             callbacks <callable> or <list<callable>>: Callback function. Default: None
@@ -241,7 +240,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
         """
         x = input
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         n_channels = self.n_channels
         reference_id = self.reference_id
@@ -271,6 +270,9 @@ class ISMultichannelNMF(MultichannelNMFbase):
             self.update_once_ozerov()
         else:
             raise ValueError("Not support {}'s MNMF.".format(self.author))
+        
+        X = self.input
+        self.estimation = self.separate(X)
     
     def update_once_sawada(self):
         self.update_base()
@@ -287,7 +289,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         X = self.covariance_input # + eps * np.eye(n_channels) # (n_bins, n_frames, n_channels, n_channels)
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         X_hat = self.reconstruct_covariance()
         inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
@@ -310,7 +312,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         X = self.covariance_input # + eps * np.eye(n_channels) # (n_bins, n_frames, n_channels, n_channels)
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         X_hat = self.reconstruct_covariance()
         inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
@@ -333,7 +335,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         X = self.covariance_input # + eps * np.eye(n_channels) # (n_bins, n_frames, n_channels, n_channels)
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         X_hat = self.reconstruct_covariance()
         TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
@@ -359,7 +361,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         X = self.covariance_input # + eps * np.eye(n_channels) # (n_bins, n_frames, n_channels, n_channels)
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         X_hat = self.reconstruct_covariance()
         inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
@@ -381,7 +383,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
     
     def reconstruct_covariance(self):
         H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_bins)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         HZ = np.sum(H[:, :, np.newaxis, :, :] * Z[np.newaxis, :, :, np.newaxis, np.newaxis], axis=1) # (n_bins, n_bases, n_channels, n_channels)
         TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
@@ -429,7 +431,7 @@ class FastISMultichannelNMF(MultichannelNMFbase):
         self.partitioning = partitioning
         self.normalize = normalize
         self.reference_id = reference_id
-        
+
         self.threshold = threshold
 
     def _reset(self, **kwargs):
