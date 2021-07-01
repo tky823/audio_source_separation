@@ -19,21 +19,26 @@ class NMFbase:
 
         self.eps = eps
     
-    def __call__(self, *args, **kwargs):
-        self.update(*args, **kwargs)
+    def __call__(self, target, iteration=100, **kwargs):
+        self.target = target
+
+        self._reset(**kwargs)
+
+        self.update(iteration=iteration)
+
         T, V = self.base, self.activation
 
         return T.copy(), V.copy()
     
-    def update(self, target, iteration=100):
+    def _reset(self, **kwargs):
         n_bases = self.n_bases
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
+        n_bins, n_frames = self.target.shape
 
         self.base = np.random.rand(n_bins, n_bases)
         self.activation = np.random.rand(n_bases, n_frames)
+    
+    def update(self, iteration=100):
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -58,6 +63,26 @@ class ComplexNMFbase:
 
         self.eps = eps
     
+    def __call__(self, target, iteration=100, **kwargs):
+        self.target = target
+
+        self._reset(**kwargs)
+        
+        self.update(iteration=iteration)
+
+        T, V = self.base, self.activation
+        Phi = self.phase
+
+        return T.copy(), V.copy(), Phi.copy()
+    
+    def _reset(self, **kwargs):
+        n_bases = self.n_bases
+        n_bins, n_frames = self.target.shape
+
+        self.base = np.random.rand(n_bins, n_bases)
+        self.activation = np.random.rand(n_bases, n_frames)
+        self.phase = 2 * np.pi * np.random.rand(n_bins, n_bases, n_frames)
+
     def init_phase(self):
         n_bases = self.n_bases
         target = self.target
@@ -65,23 +90,8 @@ class ComplexNMFbase:
         phase = np.angle(target)
         self.phase = np.tile(phase[:,np.newaxis,:], reps=(1, n_bases, 1))
     
-    def __call__(self, *args, **kwargs):
-        self.update(*args, **kwargs)
-        T, V = self.base, self.activation
-        Phi = self.phase
-
-        return T.copy(), V.copy(), Phi.copy()
-    
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
-        self.phase = 2 * np.pi * np.random.rand(n_bins, n_bases, n_frames)
+    def update(self, iteration=100):
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -108,11 +118,9 @@ class MultichannelNMFbase:
     def __call__(self, target, iteration=100, **kwargs):
         self.target = target
 
-        self._reset()
+        self._reset(**kwargs)
         
-        self.update(target, iteration=100, **kwargs)
-        
-        raise NotImplementedError("Implement `__call__` method.")
+        self.update(iteration=iteration)
     
     def _reset(self, **kwargs):
         assert self.target is not None, "Specify data!"
@@ -120,11 +128,7 @@ class MultichannelNMFbase:
         for key in kwargs.keys():
             setattr(self, key, kwargs[key])
     
-    def update(self, target, iteration=100, **kwargs):
-        self.target = target
-
-        self._reset()
-
+    def update(self, iteration=100):
         for idx in range(iteration):
             self.update_once()
         
@@ -148,16 +152,9 @@ class EUCNMF(NMFbase):
         self.algorithm = algorithm
         self.criterion = lambda input, target: (target - input)**2
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
+    def update(self, iteration=100):
         domain = self.domain
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -214,16 +211,9 @@ class KLNMF(NMFbase):
         self.algorithm = algorithm
         self.criterion = generalized_kl_divergence
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
+    def update(self, iteration=100):
         domain = self.domain
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -280,16 +270,9 @@ class ISNMF(NMFbase):
         self.algorithm = algorithm
         self.criterion = is_divergence
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
+    def update(self, iteration=100):
         domain = self.domain
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -384,16 +367,9 @@ class tNMF(NMFbase):
         self.algorithm = algorithm
         self.criterion = t_divergence
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
+    def update(self, iteration=100):
         domain = self.domain
-        eps = self.eps
-
-        self.target = target
-        n_bins, n_frames = target.shape
-
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
@@ -619,18 +595,14 @@ class ComplexEUCNMF(ComplexNMFbase):
         self.criterion = lambda input, target: np.abs(input - target)**2
         self.regularizer, self.p = regularizer, p
     
-    def update(self, target, iteration=100):
-        n_bases = self.n_bases
-        eps = self.eps
-
-        self.target = target
-        F_bin, T_bin = target.shape
-
-        self.base = np.random.rand(F_bin, n_bases)
-        self.activation = np.random.rand(n_bases, T_bin)
+    def _reset(self, **kwargs):
+        super()._reset(**kwargs)
 
         self.init_phase()
         self.update_beta()
+    
+    def update(self, iteration=100):
+        target = self.target
 
         for idx in range(iteration):
             self.update_once()
