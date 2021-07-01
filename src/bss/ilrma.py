@@ -39,6 +39,7 @@ class ILRMAbase:
             setattr(self, key, kwargs[key])
 
         n_bases = self.n_bases
+        eps = self.eps
 
         X = self.input
 
@@ -62,7 +63,11 @@ class ILRMAbase:
 
         if self.partitioning:
             if not hasattr(self, 'latent'):
-                self.latent = np.ones((n_sources, n_bases), dtype=np.float64) / n_sources
+                variance_latent = 1e-2
+                Z = np.random.rand(n_sources, n_bases) * variance_latent + 1 / n_sources
+                Zsum = Z.sum(axis=0)
+                Zsum[Zsum < eps] = eps
+                self.latent = Z / Zsum
             else:
                 self.latent = self.latent.copy()
             if not hasattr(self, 'base'):
