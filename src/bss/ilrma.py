@@ -426,7 +426,7 @@ class GaussILRMA(ILRMAbase):
 
         X, Y = self.input, self.estimation
 
-        if self.algorithm_spatial == 'IP':
+        if self.algorithm_spatial in ['IP', 'IP1']:
             W = self.demix_filter
             R = R[..., np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
             
