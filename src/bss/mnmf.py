@@ -253,12 +253,22 @@ class ISMultichannelNMF(MultichannelNMFbase):
         return y[reference_id]
     
     def update_once(self):
-        assert self.author.lower() == 'sawada', "Not support other than Sawada's MNMF."
-        
+        author = self.author.lower()
+        if author == 'sawada':
+            self.update_once_sawada()
+        elif author == 'ozerov':
+            self.update_once_ozerov()
+        else:
+            raise ValueError("Not support {}'s MNMF.".format(self.author))
+    
+    def update_once_sawada(self):
         self.update_base()
         self.update_activation()
         self.update_latent()
         self.update_spatial()
+    
+    def update_once_ozerov(self):
+        raise ValueError("Not support {}'s MNMF.".format(self.author))
     
     def update_base(self):
         n_channels = self.n_channels
