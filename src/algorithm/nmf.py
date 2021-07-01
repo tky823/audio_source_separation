@@ -31,6 +31,11 @@ class NMFbase:
         return T.copy(), V.copy()
     
     def _reset(self, **kwargs):
+        assert self.target is not None, "Specify data!"
+
+        for key in kwargs.keys():
+            setattr(self, key, kwargs[key])
+        
         n_bases = self.n_bases
         n_bins, n_frames = self.target.shape
 
@@ -76,6 +81,11 @@ class ComplexNMFbase:
         return T.copy(), V.copy(), Phi.copy()
     
     def _reset(self, **kwargs):
+        assert self.target is not None, "Specify data!"
+
+        for key in kwargs.keys():
+            setattr(self, key, kwargs[key])
+        
         n_bases = self.n_bases
         n_bins, n_frames = self.target.shape
 
