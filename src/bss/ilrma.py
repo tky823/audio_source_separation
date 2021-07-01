@@ -7,6 +7,17 @@ from algorithm.projection_back import projection_back
 EPS=1e-12
 THRESHOLD=1e+12
 
+__algorithm_spatials__ = ['IP', 'IVA', 'ISS', 'IPA', 'IP1', 'IP2']
+
+"""
+References for `algorithm_spatial`:
+    IP: "Stable and fast update rules for independent vector analysis based on auxiliary function technique"
+        same as `IP1`
+    ISS: "Fast and Stable Blind Source Separation with Rank-1 Updates"
+    IPA: 
+    IP2: "Faster independent low-rank matrix analysiswith pairwise updates of demixing vectors"
+"""
+
 class ILRMAbase:
     """
     Independent Low-rank Matrix Analysis
@@ -23,6 +34,9 @@ class ILRMAbase:
         self.n_bases = n_bases
         self.partitioning = partitioning
         self.normalize = normalize
+
+        assert algorithm_spatial in __algorithm_spatials__, "Choose from {} as `algorithm_spatial`.".format(__algorithm_spatials__)
+        assert algorithm_spatial in ['IP', 'ISS', 'IP1'], "Not support {}-based demixing filter updates.".format(algorithm_spatial)
         self.algorithm_spatial = algorithm_spatial
 
         self.input = None
