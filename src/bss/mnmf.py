@@ -21,7 +21,7 @@ __kwargs_sawada_mnmf___ = {
 """
 
 class MultichannelNMFbase:
-    def __init__(self, n_bases=10, n_sources=None, callbacks=None, eps=EPS):
+    def __init__(self, n_bases=10, n_sources=None, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             n_bases: number of bases 
@@ -32,10 +32,17 @@ class MultichannelNMFbase:
             self.callbacks = callbacks
         else:
             self.callbacks = None
+
         self.eps = eps
-        self.input = None
         self.n_bases = n_bases
         self.n_sources = n_sources
+
+        self.input = None
+        self.recordable_loss = recordable_loss
+        if self.recordable_loss:
+            self.loss = []
+        else:
+            self.loss = None
         self.loss = []
     
     def _reset(self, **kwargs):
@@ -65,8 +72,9 @@ class MultichannelNMFbase:
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()    
-        self.loss.append(loss)
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
 
         if self.callbacks is not None:
             for callback in self.callbacks:
@@ -75,8 +83,9 @@ class MultichannelNMFbase:
         for idx in range(iteration):
             self.update_once()
 
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
 
             if self.callbacks is not None:
                 for callback in self.callbacks:
@@ -110,7 +119,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
         Ozerov's MNMF: "Multichannel Nonnegative Matrix Factorization in Convolutive Mixtures for Audio Source Separation"
     See https://ieeexplore.ieee.org/document/6410389 and https://ieeexplore.ieee.org/document/5229304
     """
-    def __init__(self, n_bases=10, n_sources=None, normalize=True, callbacks=None, reference_id=0, author='Sawada', eps=EPS):
+    def __init__(self, n_bases=10, n_sources=None, normalize=True, callbacks=None, reference_id=0, author='Sawada', recordable_loss=True, eps=EPS):
         """
         Args:
             n_bases
@@ -122,7 +131,7 @@ class ISMultichannelNMF(MultichannelNMFbase):
             author <str>: 'Sawada' or 'Ozerov'
             eps <float>: Machine epsilon
         """
-        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, eps=eps)
+        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.normalize = normalize
 
@@ -143,8 +152,9 @@ class ISMultichannelNMF(MultichannelNMFbase):
 
         self._reset(**kwargs)
 
-        loss = self.compute_negative_loglikelihood()    
-        self.loss.append(loss)
+        if self.recordable_loss:
+            loss = self.compute_negative_loglikelihood()
+            self.loss.append(loss)
 
         if self.callbacks is not None:
             for callback in self.callbacks:
@@ -153,8 +163,9 @@ class ISMultichannelNMF(MultichannelNMFbase):
         for idx in range(iteration):
             self.update_once()
 
-            loss = self.compute_negative_loglikelihood()
-            self.loss.append(loss)
+            if self.recordable_loss:
+                loss = self.compute_negative_loglikelihood()
+                self.loss.append(loss)
 
             if self.callbacks is not None:
                 for callback in self.callbacks:
@@ -392,13 +403,13 @@ class tMultichannelNMF(MultichannelNMFbase):
     Reference: "Student's t multichannel nonnegative matrix factorization for blind source separation"
     See https://ieeexplore.ieee.org/document/7602889
     """
-    def __init__(self, n_bases=10, n_sources=None, reference_id=0, callbacks=None, eps=EPS):
+    def __init__(self, n_bases=10, n_sources=None, reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
         """
         warnings.warn("in progress", UserWarning)
 
-        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, eps=eps)
+        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
     
@@ -413,13 +424,12 @@ class FastISMultichannelNMF(MultichannelNMFbase):
         """
         Args:
         """
-        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, eps=eps)
+        super().__init__(n_bases=n_bases, n_sources=n_sources, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.partitioning = partitioning
         self.normalize = normalize
         self.reference_id = reference_id
-
-        self.recordable_loss = recordable_loss
+        
         self.threshold = threshold
 
     def _reset(self, **kwargs):
