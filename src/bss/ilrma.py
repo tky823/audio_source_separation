@@ -36,7 +36,7 @@ class ILRMAbase:
         self.normalize = normalize
 
         assert algorithm_spatial in __algorithm_spatials__, "Choose from {} as `algorithm_spatial`.".format(__algorithm_spatials__)
-        assert algorithm_spatial in ['IP', 'ISS', 'IP1'], "Not support {}-based demixing filter updates.".format(algorithm_spatial)
+        assert algorithm_spatial in ['IP', 'ISS', 'pairwise', 'IP1', 'IP2'], "Not support {}-based demixing filter updates.".format(algorithm_spatial)
         self.algorithm_spatial = algorithm_spatial
 
         self.input = None
