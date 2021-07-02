@@ -7,7 +7,7 @@ from algorithm.projection_back import projection_back
 EPS=1e-12
 THRESHOLD=1e+12
 
-__algorithm_spatials__ = ['IP', 'IVA', 'ISS', 'IPA', 'pairwise', 'IP1', 'IP2']
+__algorithms_spatial__ = ['IP', 'IVA', 'ISS', 'IPA', 'pairwise', 'IP1', 'IP2']
 
 """
 References for `algorithm_spatial`:
@@ -35,7 +35,7 @@ class ILRMAbase:
         self.partitioning = partitioning
         self.normalize = normalize
 
-        assert algorithm_spatial in __algorithm_spatials__, "Choose from {} as `algorithm_spatial`.".format(__algorithm_spatials__)
+        assert algorithm_spatial in __algorithms_spatial__, "Choose from {} as `algorithm_spatial`.".format(__algorithms_spatial__)
         assert algorithm_spatial in ['IP', 'ISS', 'pairwise', 'IP1', 'IP2'], "Not support {}-based demixing filter updates.".format(algorithm_spatial)
         self.algorithm_spatial = algorithm_spatial
 
