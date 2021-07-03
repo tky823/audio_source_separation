@@ -133,8 +133,6 @@ class MultichannelISNMF(MultichannelNMFbase):
 
         self.normalize = normalize
 
-        self.reference_id = reference_id
-
         assert author.lower() in __authors__, "Choose from {}".format(__authors__)
 
         self.author = author
@@ -146,6 +144,8 @@ class MultichannelISNMF(MultichannelNMFbase):
                 setattr(self, key, __kwargs_sawada_mnmf___[key])
             for key in kwargs.keys():
                 setattr(self, key, kwargs[key])
+        else:
+            warnings.warn("in progress", UserWarning)
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -283,89 +283,6 @@ class MultichannelISNMF(MultichannelNMFbase):
         s += ")"
 
         return s.format(**self.__dict__)
-
-    def separate(self, input):
-        """
-        Args:
-            input (n_channels, n_bins, n_frames):
-        Returns:
-            output (n_channels, n_bins, n_frames): 
-        """
-        author = self.author
-
-        if author.lower() == 'sawada':
-            y = self.separate_sawada(input)
-        elif author.lower() == 'ozerov':
-            y = self.separate_ozerov(input)
-        else:
-            raise ValueError("Not support")
-        
-        return y
-    
-    def separate_sawada(self, input):
-        """
-        Args:
-            input (n_channels, n_bins, n_frames):
-        Returns:
-            output (n_channels, n_bins, n_frames): 
-        """
-        x = input
-        H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
-
-        n_channels = self.n_channels
-        reference_id = self.reference_id
-        eps = self.eps
-
-        HZ = np.sum(H[:, :, np.newaxis, :, :] * Z[np.newaxis, :, :, np.newaxis, np.newaxis], axis=1) # (n_bins, n_bases, n_channels, n_channels)
-        TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
-        X_hat = np.sum(HZ[:, :, np.newaxis, :, :] * TV[:, :, :, np.newaxis, np.newaxis], axis=1) # (n_bins, n_frames, n_channels, n_channels)
-        inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels))
-        HX = H[:, :, np.newaxis, :, :] @ inv_X_hat[:, np.newaxis, :, :, :] # (n_bins, n_sources, n_frames, n_channels, n_channels)
-        x = x.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
-        HX = HX.transpose(1, 0, 2, 3, 4) # (n_sources, n_bins, n_frames, n_channels, n_channels)
-        HXx = HX @ x[:, :, :, np.newaxis] # (n_sources, n_bins, n_frames, n_channels, 1)
-        HXx = HXx[..., 0].transpose(3, 0, 1, 2)
-
-        ZTV = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[np.newaxis, :, :, np.newaxis] * V[np.newaxis, np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
-
-        y = ZTV * HXx
-        
-        return y[reference_id]
-    
-    def separate_ozerov(self, input):
-        """
-        Args:
-            input (n_channels, n_bins, n_frames):
-        Returns:
-            output (n_channels, n_bins, n_frames): 
-        """
-        # TODO: implement
-        n_channels = self.n_channels
-
-        x = self.input # (n_channels, n_bins, n_frames)
-        A = self.mix_filter # (n_bins, n_channels, n_sources)
-        sigma_b = self.noise_covariance
-        W, H = self.base, self.activation
-
-        x = x.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
-        A_Hermite = A.transpose(0, 2, 1).conj() # (n_bins, n_sources, n_channels)
-        Sigma_b = sigma_b[:, :, np.newaxis] * np.eye(n_channels)
-
-        WH = W[:, :, :, np.newaxis] * H[:, np.newaxis, :, :] # (n_sources, n_bins, n_bases, n_frames)
-        sigma_s = np.sum(WH, axis=2).transpose(1, 2, 0) # (n_bins, n_frames, n_sources)
-        A_sigma_s = A[:, np.newaxis, :, :] * sigma_s[:, :, np.newaxis, :] # (n_bins, n_frames, 1, n_sources), (n_bins, 1, n_channels, n_sources) -> (n_bins, n_frames, n_channels, n_sources)
-        A_sigma_s_A_Hermite = A_sigma_s @ A_Hermite[:, np.newaxis, :, :] # (n_bins, n_frames, n_channels, n_sources), (n_bins, 1, n_sources, n_channels) -> (n_bins, n_frames, n_channels, n_channels)
-        Sigma_x = A_sigma_s @ A_sigma_s_A_Hermite + Sigma_b[:, np.newaxis, :, :] # (n_bins, n_frames, n_channels, n_channels)
-        inv_Sigma_x = np.linalg.inv(Sigma_x) # (n_bins, n_frames, n_channels, n_channels)
-        A_Hermite_inv_Sigma_x = A_Hermite[:, np.newaxis, :, :] @ inv_Sigma_x # (n_bins, n_frames, n_sources, n_channels)
-        
-        # TODO: Woodbery
-        G_s = sigma_s[:, :, :, np.newaxis] * A_Hermite_inv_Sigma_x # (n_bins, n_frames, n_sources, n_channels)
-        s = np.sum(G_s * x[:, :, np.newaxis, :], axis=3) # (n_bins, n_frames, n_sources)
-        s = s.transpose(2, 0, 1) # (n_sources, n_bins, n_frames)
-        
-        return s
     
     def update_once(self):
         author = self.author.lower()
@@ -394,7 +311,7 @@ class MultichannelISNMF(MultichannelNMFbase):
         x = self.input # (n_channels, n_bins, n_frames)
         A = self.mix_filter # (n_bins, n_channels, n_sources)
         sigma_b = self.noise_covariance
-        W, H = self.base, self.activation
+        W, H = self.base, self.activation # (n_sources, n_bins, n_bases), (n_sources, n_bases, n_frames)
 
         # E step
         x = x.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
@@ -409,11 +326,12 @@ class MultichannelISNMF(MultichannelNMFbase):
         A_sigma_s = A[:, np.newaxis, :, :] * sigma_s[:, :, np.newaxis, :] # (n_bins, n_frames, 1, n_sources), (n_bins, 1, n_channels, n_sources) -> (n_bins, n_frames, n_channels, n_sources)
         A_sigma_s_A_Hermite = A_sigma_s @ A_Hermite[:, np.newaxis, :, :] # (n_bins, n_frames, n_channels, n_sources), (n_bins, 1, n_sources, n_channels) -> (n_bins, n_frames, n_channels, n_channels)
         Sigma_x = A_sigma_s_A_Hermite + Sigma_b[:, np.newaxis, :, :] # (n_bins, n_frames, n_channels, n_channels)
+        Sigma_x = (Sigma_x + Sigma_x.transpose(0, 1, 3, 2).conj()) / 2
         inv_Sigma_x = np.linalg.inv(Sigma_x) # (n_bins, n_frames, n_channels, n_channels)
         A_Hermite_inv_Sigma_x = A_Hermite[:, np.newaxis, :, :] @ inv_Sigma_x # (n_bins, n_frames, n_sources, n_channels)
         A_aug_Hermite_inv_Sigma_x = A_aug_Hermite[:, np.newaxis, :, :] @ inv_Sigma_x # (n_bins, n_sources * n_bases, n_channels)
 
-        # TODO: Woodbery
+        # TODO: Woodbury
         G_s = sigma_s[:, :, :, np.newaxis] * A_Hermite_inv_Sigma_x # (n_bins, n_frames, n_sources, n_channels)
         s = np.sum(G_s * x[:, :, np.newaxis, :], axis=3) # (n_bins, n_frames, n_sources)
         G_c = sigma_c[:, :, :, np.newaxis] * A_aug_Hermite_inv_Sigma_x # (n_bins, n_sources * n_bases, n_channels)
@@ -425,6 +343,7 @@ class MultichannelISNMF(MultichannelNMFbase):
         G_s_A = G_s @ A[:, np.newaxis, :, :] # (n_bins, n_frames, n_sources, n_sources)
         I_G_s_A = np.eye(n_sources) - G_s_A # (n_bins, n_frames, n_sources, n_sources)
         R_ss = np.mean(s[:, :, :, np.newaxis] * s[:, :, np.newaxis, :].conj() + I_G_s_A * sigma_s[:, :, np.newaxis, :], axis=1) # (n_bins, n_sources, n_sources)
+        R_ss = (R_ss + R_ss.transpose(0, 2, 1).conj()) / 2
 
         G_c_A_aug = G_c @ A_aug[:, np.newaxis, :, :] # (n_bins, n_frames, n_sources * n_bases, n_sources * n_bases)
         I_G_c_A_aug = np.eye(n_sources * n_bases) - G_c_A_aug # (n_bins, n_frames, n_sources * n_bases, n_sources * n_bases)
@@ -440,6 +359,16 @@ class MultichannelISNMF(MultichannelNMFbase):
         sigma_b = np.diagonal(R_xx - A @ R_xs_Hermite - R_xs @ A_Hermite + A @ R_ss @ A_Hermite, axis1=-2, axis2=-1).real # (n_bins, n_channels)
         W, H = np.mean(U / H[:, np.newaxis, :, :], axis=3), np.mean(U / W[:, :, :, np.newaxis], axis=1)
 
+        if self.normalize:
+            scale = np.sqrt(np.sum(np.abs(A)**2, keepdims=True)) # (n_bins, 1, n_sources)
+            A /= scale
+            scale = scale.transpose(2, 0, 1) # (n_sources, n_bins, 1)
+            W /= scale
+
+            scale = W.sum(axis=1) # (n_sources, n_bases)
+            W /= scale[:, np.newaxis, :]
+            T *= scale[:, :, np.newaxis]
+
         self.mix_filter = A
         self.noise_covariance = sigma_b
         self.base, self.activation = W, H
@@ -453,13 +382,13 @@ class MultichannelISNMF(MultichannelNMFbase):
         T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
 
         X_hat = self.reconstruct_covariance()
-        inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
-        XXX = inv_X_hat @ X @ inv_X_hat # (n_bins, n_frames, n_channels, n_channels)
+        X_hat_inv = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
+        XXX = X_hat_inv @ X @ X_hat_inv # (n_bins, n_frames, n_channels, n_channels)
         
         numerator = np.trace(XXX[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_sources, 1, n_channels, n_channels) -> (n_bins, n_sources, n_frames)
         numerator = np.sum(V[np.newaxis, np.newaxis, :, :] * numerator[:, :, np.newaxis, :], axis=3) # (n_bins, n_sources, n_bases)
         numerator = np.sum(Z * numerator, axis=1) # (n_bins, n_bases)
-        denominator = np.trace(inv_X_hat[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_sources, 1, n_channels, n_channels) -> (n_bins, n_sources, n_frames)
+        denominator = np.trace(X_hat_inv[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_sources, 1, n_channels, n_channels) -> (n_bins, n_sources, n_frames)
         denominator = np.sum(V[np.newaxis, np.newaxis, :, :] * denominator[:, :, np.newaxis, :], axis=3) # (n_bins, n_sources, n_bases)
         denominator = np.sum(Z * denominator, axis=1) # (n_bins, n_bases)
         denominator[denominator < eps] = eps
@@ -590,11 +519,95 @@ class MultichannelISNMF(MultichannelNMFbase):
         A_sigma_s = A[:, np.newaxis, :, :] * sigma_s[:, :, np.newaxis, :] # (n_bins, n_frames, 1, n_sources), (n_bins, 1, n_channels, n_sources) -> (n_bins, n_frames, n_channels, n_sources)
         A_sigma_s_A_Hermite = A_sigma_s @ A_Hermite[:, np.newaxis, :, :] # (n_bins, n_frames, n_channels, n_sources), (n_bins, 1, n_sources, n_channels) -> (n_bins, n_frames, n_channels, n_channels)
         Sigma_x = A_sigma_s_A_Hermite + Sigma_b[:, np.newaxis, :, :] # (n_bins, n_frames, n_channels, n_channels)
-        
+        Sigma_x = (Sigma_x + Sigma_x.transpose(0, 1, 3, 2).conj()) / 2
+
         loss = np.trace(xx_Hermite @ Sigma_x, axis1=-2, axis2=-1).real + np.log(np.linalg.det(Sigma_x)).real
         loss = loss.sum()
 
         return loss
+
+    def separate(self, input):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames):
+        Returns:
+            output (n_channels, n_bins, n_frames): 
+        """
+        author = self.author
+
+        if author.lower() == 'sawada':
+            y = self.separate_sawada(input)
+        elif author.lower() == 'ozerov':
+            y = self.separate_ozerov(input)
+        else:
+            raise ValueError("Not support")
+        
+        return y
+    
+    def separate_sawada(self, input):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames):
+        Returns:
+            output (n_channels, n_bins, n_frames): 
+        """
+        x = input
+        H, Z = self.spatial, self.latent # (n_bins, n_sources, n_channels, n_channels), (n_sources, n_bases)
+        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
+
+        n_channels = self.n_channels
+        reference_id = self.reference_id
+        eps = self.eps
+
+        HZ = np.sum(H[:, :, np.newaxis, :, :] * Z[np.newaxis, :, :, np.newaxis, np.newaxis], axis=1) # (n_bins, n_bases, n_channels, n_channels)
+        TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
+        X_hat = np.sum(HZ[:, :, np.newaxis, :, :] * TV[:, :, :, np.newaxis, np.newaxis], axis=1) # (n_bins, n_frames, n_channels, n_channels)
+        X_hat_inv = np.linalg.inv(X_hat + eps * np.eye(n_channels))
+        HX = H[:, :, np.newaxis, :, :] @ X_hat_inv[:, np.newaxis, :, :, :] # (n_bins, n_sources, n_frames, n_channels, n_channels)
+        x = x.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+        HX = HX.transpose(1, 0, 2, 3, 4) # (n_sources, n_bins, n_frames, n_channels, n_channels)
+        HXx = HX @ x[:, :, :, np.newaxis] # (n_sources, n_bins, n_frames, n_channels, 1)
+        HXx = HXx[..., 0].transpose(3, 0, 1, 2)
+
+        ZTV = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[np.newaxis, :, :, np.newaxis] * V[np.newaxis, np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
+
+        y = ZTV * HXx
+        
+        return y[reference_id]
+    
+    def separate_ozerov(self, input):
+        """
+        Args:
+            input (n_channels, n_bins, n_frames):
+        Returns:
+            output (n_channels, n_bins, n_frames): 
+        """
+        n_channels = self.n_channels
+
+        x = input # (n_channels, n_bins, n_frames)
+        A = self.mix_filter # (n_bins, n_channels, n_sources)
+        sigma_b = self.noise_covariance
+        W, H = self.base, self.activation
+
+        x = x.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+        A_Hermite = A.transpose(0, 2, 1).conj() # (n_bins, n_sources, n_channels)
+        Sigma_b = sigma_b[:, :, np.newaxis] * np.eye(n_channels)
+
+        WH = W[:, :, :, np.newaxis] * H[:, np.newaxis, :, :] # (n_sources, n_bins, n_bases, n_frames)
+        sigma_s = np.sum(WH, axis=2).transpose(1, 2, 0) # (n_bins, n_frames, n_sources)
+        A_sigma_s = A[:, np.newaxis, :, :] * sigma_s[:, :, np.newaxis, :] # (n_bins, n_frames, 1, n_sources), (n_bins, 1, n_channels, n_sources) -> (n_bins, n_frames, n_channels, n_sources)
+        A_sigma_s_A_Hermite = A_sigma_s @ A_Hermite[:, np.newaxis, :, :] # (n_bins, n_frames, n_channels, n_sources), (n_bins, 1, n_sources, n_channels) -> (n_bins, n_frames, n_channels, n_channels)
+        Sigma_x = A_sigma_s @ A_sigma_s_A_Hermite + Sigma_b[:, np.newaxis, :, :] # (n_bins, n_frames, n_channels, n_channels)
+        Sigma_x = (Sigma_x + Sigma_x.transpose(0, 1, 3, 2).conj()) / 2
+        inv_Sigma_x = np.linalg.inv(Sigma_x) # (n_bins, n_frames, n_channels, n_channels)
+        A_Hermite_inv_Sigma_x = A_Hermite[:, np.newaxis, :, :] @ inv_Sigma_x # (n_bins, n_frames, n_sources, n_channels)
+        
+        # TODO: Woodbury
+        G_s = sigma_s[:, :, :, np.newaxis] * A_Hermite_inv_Sigma_x # (n_bins, n_frames, n_sources, n_channels)
+        s = np.sum(G_s * x[:, :, np.newaxis, :], axis=3) # (n_bins, n_frames, n_sources)
+        s = s.transpose(2, 0, 1) # (n_sources, n_bins, n_frames)
+        
+        return s
 
 class MultichanneltNMF(MultichannelNMFbase):
     """
@@ -1026,7 +1039,6 @@ def _test_conv():
     if not os.path.exists(wav_path):
         mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
         write_wav(wav_path, mixed_signal.T, sr=sr)
-
 
 if __name__ == '__main__':
     import os
