@@ -4,9 +4,19 @@ import scipy.sparse as sci_sparse
 from bss.prox import PDSBSSbase
 from algorithm.projection_back import projection_back
 
-EPS=1e-12
-THRESHOLD=1e+12
-__algorithms_spatial__ = ['IP', 'ISS', 'IPA']
+EPS = 1e-12
+THRESHOLD = 1e+12
+
+__algorithms_spatial__ = ['IP', 'IVA', 'ISS', 'IPA', 'pairwise', 'IP1', 'IP2']
+
+"""
+References for `algorithm_spatial`:
+    IP: "Stable and fast update rules for independent vector analysis based on auxiliary function technique"
+        same as `IP1`
+    ISS: "Fast and Stable Blind Source Separation with Rank-1 Updates"
+    IPA:
+    IP2:
+"""
 
 class IVAbase:
     def __init__(self, callbacks=None, recordable_loss=True, eps=EPS):
@@ -294,6 +304,9 @@ class AuxIVAbase(IVAbase):
 
         if not self.algorithm_spatial in __algorithms_spatial__:
             raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
+        
+        if self.algorithm_spatial in ['pairwise', 'IP2']:
+            self.update_pair = None
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -315,6 +328,9 @@ class AuxIVAbase(IVAbase):
                 callback(self)
 
         for idx in range(iteration):
+            if self.algorithm_spatial in ['pairwise', 'IP2']:
+                self._select_update_pair()
+            
             self.update_once()
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
@@ -351,6 +367,19 @@ class AuxIVAbase(IVAbase):
     
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function.")
+    
+    def _select_update_pair(self):
+        # For pairwise update
+        n_sources = self.n_sources
+
+        if self.update_pair is None:
+            m, n = 0, 1
+        else:
+            m, n = self.update_pair
+            m, n = m + 1, n + 1
+            m, n = m % n_sources, n % n_sources
+
+        self.update_pair = m, n
 
     def compute_negative_loglikelihood(self):
         raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
@@ -390,6 +419,9 @@ class AuxLaplaceIVA(AuxIVAbase):
                     callback(self)
 
         for idx in range(iteration):
+            if self.algorithm_spatial in ['pairwise', 'IP2']:
+                self._select_update_pair()
+            
             self.update_once()
 
             if self.recordable_loss:
@@ -438,66 +470,86 @@ class AuxLaplaceIVA(AuxIVAbase):
         return s.format(**self.__dict__)
     
     def update_once(self):
+        if self.algorithm_spatial in ['IP', 'IP1']:
+            self.update_once_ip()
+        elif self.algorithm_spatial == 'ISS':
+            self.update_once_iss()
+        elif self.algorithm_spatial in ['pairwise', 'IP2']:
+            self.update_once_pairwise()
+        elif self.algorithm_spatial == 'IPA':
+            self.update_once_ipa()
+        else:
+            raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
+    
+    def update_once_ip(self):
         n_sources, n_channels = self.n_sources, self.n_channels
         n_bins = self.n_bins
         eps, threshold = self.eps, self.threshold
 
         X, Y = self.input, self.estimation
+        W = self.demix_filter
+
         P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
         R = np.sqrt(P.sum(axis=1)) # (n_sources, n_frames)
+        R = R[:, np.newaxis, :, np.newaxis, np.newaxis] # (n_sources, 1, n_frames, 1, 1)
 
-        if self.algorithm_spatial == 'IP':
-            W = self.demix_filter
-            R = R[:, np.newaxis, :, np.newaxis, np.newaxis] # (n_sources, 1, n_frames, 1, 1)
+        X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+        X = X[..., np.newaxis]
+        X_Hermite = X.transpose(0, 1, 3, 2).conj()
+        XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+        R[R < eps] = eps
+        U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
+        U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
+        E = np.eye(n_sources, n_channels)
+        E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
 
-            X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
-            X = X[..., np.newaxis]
-            X_Hermite = X.transpose(0, 1, 3, 2).conj()
-            XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
-            R[R < eps] = eps
-            U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
-            U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
-            E = np.eye(n_sources, n_channels)
-            E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
-
-            for n in range(n_sources):
-                # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-                w_n_Hermite = W[:, n, :] # (n_bins, n_channels)
-                U_n = U[n] # (n_bins, n_channels, n_channels)
-                WU = W @ U_n # (n_bins, n_sources, n_channels)
-                condition = np.linalg.cond(WU) < threshold # (n_bins,)
-                condition = condition[:, np.newaxis] # (n_bins, 1)
-                e_n = E[:, n, :]
-                w_n = np.linalg.solve(WU, e_n)
-                wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
-                denominator = np.sqrt(wUw[..., 0])
-                w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
-                # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
-                W[:, n, :] = w_n_Hermite
+        for n in range(n_sources):
+            # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
+            w_n_Hermite = W[:, n, :] # (n_bins, n_channels)
+            U_n = U[n] # (n_bins, n_channels, n_channels)
+            WU = W @ U_n # (n_bins, n_sources, n_channels)
+            condition = np.linalg.cond(WU) < threshold # (n_bins,)
+            condition = condition[:, np.newaxis] # (n_bins, 1)
+            e_n = E[:, n, :]
+            w_n = np.linalg.solve(WU, e_n)
+            wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
+            denominator = np.sqrt(wUw[..., 0])
+            w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
+            # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
+            W[:, n, :] = w_n_Hermite
             
-            self.demix_filter = W
+        self.demix_filter = W
 
-            X = self.input
-            Y = self.separate(X, demix_filter=W)
-        elif self.algorithm_spatial == 'ISS':
-            P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
-            R = np.sqrt(P.sum(axis=1)) # (n_sources, n_frames)
-            R[R < eps] = eps
-
-            for n in range(n_sources):
-                U_n = np.sum(Y * Y[n].conj() / R[:, np.newaxis, :], axis=2) # (n_sources, n_bins)
-                D_n = np.sum(np.abs(Y[n])**2 / R[:, np.newaxis, :], axis=2) # (n_sources, n_bins)
-                V_n = U_n / D_n # (n_sources, n_bins)
-                V_n[n] = 1 - 1 / np.sqrt(D_n[n])
-                Y = Y - V_n[:, :, np.newaxis] * Y[n]
-        
-        elif self.algorithm_spatial == 'IPA':
-            raise ValueError("in progress...")
-        else:
-            raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
         
         self.estimation = Y
     
+    def update_once_iss(self):
+        n_sources = self.n_sources
+        eps, = self.eps
+
+        Y = self.estimation
+
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        R = np.sqrt(P.sum(axis=1)) # (n_sources, n_frames)
+        R[R < eps] = eps
+
+        for n in range(n_sources):
+            U_n = np.sum(Y * Y[n].conj() / R[:, np.newaxis, :], axis=2) # (n_sources, n_bins)
+            D_n = np.sum(np.abs(Y[n])**2 / R[:, np.newaxis, :], axis=2) # (n_sources, n_bins)
+            V_n = U_n / D_n # (n_sources, n_bins)
+            V_n[n] = 1 - 1 / np.sqrt(D_n[n])
+            Y = Y - V_n[:, :, np.newaxis] * Y[n]
+        
+        self.estimation = Y
+
+    def update_once_pairwise(self):
+        raise ValueError("in progress...")
+    
+    def update_once_ipa(self):
+        raise ValueError("in progress...")
+
     def compute_negative_loglikelihood(self):
         n_frames = self.n_frames
 
@@ -549,6 +601,9 @@ class AuxGaussIVA(AuxIVAbase):
                     callback(self)
 
         for idx in range(iteration):
+            if self.algorithm_spatial in ['pairwise', 'IP2']:
+                self._select_update_pair()
+            
             self.update_once()
 
             if self.recordable_loss:
@@ -597,62 +652,88 @@ class AuxGaussIVA(AuxIVAbase):
         return s.format(**self.__dict__)
     
     def update_once(self):
-        n_sources, n_channels = self.n_sources, self.n_channels
-        n_bins = self.n_bins
-        eps, threshold = self.eps, self.threshold
-
-        X, Y = self.input, self.estimation
-
-        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
-        R = P.mean(axis=1) # (n_sources, n_frames)
-
-        if self.algorithm_spatial == 'IP':
-            W = self.demix_filter
-            R = R[:, np.newaxis, :, np.newaxis, np.newaxis] # (n_sources, 1, n_frames, 1, 1)
-
-            X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
-            X = X[..., np.newaxis]
-            X_Hermite = X.transpose(0, 1, 3, 2).conj()
-            XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
-            R[R < eps] = eps
-            U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
-            U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
-            E = np.eye(n_sources, n_channels)
-            E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
-
-            for n in range(n_sources):
-                # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-                w_n_Hermite = W[:, n, :] # (n_bins, n_channels)
-                U_n = U[n] # (n_bins, n_channels, n_channels)
-                WU = W @ U_n # (n_bins, n_sources, n_channels)
-                condition = np.linalg.cond(WU) < threshold # (n_bins,)
-                condition = condition[:, np.newaxis] # (n_bins, 1)
-                e_n = E[:, n, :]
-                w_n = np.linalg.solve(WU, e_n)
-                wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
-                denominator = np.sqrt(wUw[..., 0])
-                w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
-                # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
-                W[:, n, :] = w_n_Hermite
-            
-            self.demix_filter = W
-
-            X = self.input
-            Y = self.separate(X, demix_filter=W)
+        if self.algorithm_spatial in ['IP', 'IP1']:
+            self.update_once_ip()
         elif self.algorithm_spatial == 'ISS':
-            R[R < eps] = eps
-
-            for n in range(n_sources):
-                U_n = np.sum(Y * Y[n].conj() / R[:, np.newaxis, :], axis=2) # (n_sources, n_bins)
-                D_n = np.sum(np.abs(Y[n])**2 / R[:, np.newaxis, :], axis=2) # (n_sources, n_bins)
-                V_n = U_n / D_n # (n_sources, n_bins)
-                V_n[n] = 1 - 1 / np.sqrt(D_n[n])
-                Y = Y - V_n[:, :, np.newaxis] * Y[n]
+            self.update_once_iss()
+        elif self.algorithm_spatial in ['pairwise', 'IP2']:
+            self.update_once_pairwise()
+        elif self.algorithm_spatial == 'IPA':
+            self.update_once_ipa()
         else:
             raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
         
         self.estimation = Y
     
+    def update_once_ip(self):
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_bins = self.n_bins
+        eps, threshold = self.eps, self.threshold
+
+        X, Y = self.input, self.estimation
+        W = self.demix_filter
+
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        R = P.mean(axis=1) # (n_sources, n_frames)
+        R = R[:, np.newaxis, :, np.newaxis, np.newaxis] # (n_sources, 1, n_frames, 1, 1)
+
+        X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+        X = X[..., np.newaxis]
+        X_Hermite = X.transpose(0, 1, 3, 2).conj()
+        XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+        R[R < eps] = eps
+        U = XX / R # (n_sources, n_bins, n_frames, n_channels, n_channels)
+        U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
+        E = np.eye(n_sources, n_channels)
+        E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
+
+        for n in range(n_sources):
+            # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
+            w_n_Hermite = W[:, n, :] # (n_bins, n_channels)
+            U_n = U[n] # (n_bins, n_channels, n_channels)
+            WU = W @ U_n # (n_bins, n_sources, n_channels)
+            condition = np.linalg.cond(WU) < threshold # (n_bins,)
+            condition = condition[:, np.newaxis] # (n_bins, 1)
+            e_n = E[:, n, :]
+            w_n = np.linalg.solve(WU, e_n)
+            wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
+            denominator = np.sqrt(wUw[..., 0])
+            w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
+            # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
+            W[:, n, :] = w_n_Hermite
+        
+        self.demix_filter = W
+
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
+        
+        self.estimation = Y
+    
+    def update_once_iss(self):
+        n_sources = self.n_sources
+        eps = self.eps
+
+        Y = self.estimation
+
+        P = np.abs(Y)**2 # (n_sources, n_bins, n_frames)
+        R = P.mean(axis=1) # (n_sources, n_frames)
+        R[R < eps] = eps
+
+        for n in range(n_sources):
+            U_n = np.sum(Y * Y[n].conj() / R[:, np.newaxis, :], axis=2) # (n_sources, n_bins)
+            D_n = np.sum(np.abs(Y[n])**2 / R[:, np.newaxis, :], axis=2) # (n_sources, n_bins)
+            V_n = U_n / D_n # (n_sources, n_bins)
+            V_n[n] = 1 - 1 / np.sqrt(D_n[n])
+            Y = Y - V_n[:, :, np.newaxis] * Y[n]
+        
+        self.estimation = Y
+    
+    def update_once_pairwise(self):
+        raise NotImplementedError("In progress...")
+    
+    def update_once_ipa(self):
+        raise NotImplementedError("In progress...")
+
     def compute_negative_loglikelihood(self):
         X = self.input
 
