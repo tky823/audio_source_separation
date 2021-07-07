@@ -7,6 +7,17 @@ from algorithm.projection_back import projection_back
 EPS=1e-12
 THRESHOLD=1e+12
 
+__algorithms_spatial__ = ['IP', 'IVA', 'ISS', 'IPA', 'pairwise', 'IP1', 'IP2']
+
+"""
+References for `algorithm_spatial`:
+    IP: "Stable and fast update rules for independent vector analysis based on auxiliary function technique"
+        same as `IP1`
+    ISS: "Fast and Stable Blind Source Separation with Rank-1 Updates"
+    IPA: 
+    IP2: "Faster independent low-rank matrix analysiswith pairwise updates of demixing vectors"
+"""
+
 class ILRMAbase:
     """
     Independent Low-rank Matrix Analysis
@@ -23,6 +34,9 @@ class ILRMAbase:
         self.n_bases = n_bases
         self.partitioning = partitioning
         self.normalize = normalize
+
+        assert algorithm_spatial in __algorithms_spatial__, "Choose from {} as `algorithm_spatial`.".format(__algorithms_spatial__)
+        assert algorithm_spatial in ['IP', 'ISS', 'pairwise', 'IP1', 'IP2'], "Not support {}-based demixing filter updates.".format(algorithm_spatial)
         self.algorithm_spatial = algorithm_spatial
 
         self.input = None
@@ -181,6 +195,9 @@ class GaussILRMA(ILRMAbase):
 
         if self.algorithm_spatial == 'ISS':
             warnings.warn("in progress", UserWarning)
+        
+        if self.algorithm_spatial in ['pairwise', 'IP2']:
+            self.update_pair = None
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -213,6 +230,9 @@ class GaussILRMA(ILRMAbase):
                     callback(self)
 
         for idx in range(iteration):
+            if self.algorithm_spatial in ['pairwise', 'IP2']:
+                self._select_update_pair()
+            
             self.update_once()
 
             if self.recordable_loss:
@@ -267,7 +287,7 @@ class GaussILRMA(ILRMAbase):
         eps = self.eps
 
         self.update_source_model()
-        self.update_space_model()
+        self.update_spatial_model()
         
         if self.normalize:
             if self.algorithm_spatial == 'ISS':
@@ -317,6 +337,22 @@ class GaussILRMA(ILRMAbase):
                 self.demix_filter = W
     
     def update_source_model(self):
+        if self.algorithm_spatial in ['pairwise', 'IP2']:
+            self.update_source_model_pairwise()
+        else:
+            self.update_source_model_basic()
+    
+    def update_spatial_model(self):
+        if self.algorithm_spatial in ['IP', 'IP1']:
+            self.update_spatial_model_ip()
+        elif self.algorithm_spatial == 'ISS':
+            self.update_spatial_model_iss()
+        elif self.algorithm_spatial in ['pairwise', 'IP2']:
+            self.update_spatial_model_pairwise()
+        else:
+            raise NotImplementedError("Not support {}-based spatial update.".format(self.algorithm_spatial))
+    
+    def update_source_model_basic(self):
         domain = self.domain
         eps = self.eps
 
@@ -392,7 +428,58 @@ class GaussILRMA(ILRMAbase):
 
             self.base, self.activation = T, V
 
-    def update_space_model(self):
+    def update_source_model_pairwise(self):
+        domain = self.domain
+        m, n = self.update_pair
+
+        eps = self.eps
+
+        if self.demix_filter is None:
+            Y = self.estimation
+        else:
+            X, W = self.input, self.demix_filter
+            Y = self.separate(X, demix_filter=W)
+        
+        Y_m, Y_n = Y[m], Y[n]
+        P_m, P_n = np.abs(Y_m)**2, np.abs(Y_n)**2
+
+        T, V = self.base, self.activation
+        T_m, T_n = T[m], T[n] # (n_bins, n_bases), (n_bins, n_bases)
+        V_m, V_n = V[m], V[n] # (n_bases, n_frames), (n_bases, n_frames)
+        
+        if self.partitioning:
+            assert domain == 2, "Not support domain = {}".format(domain)
+            raise NotImplementedError("Not support partitioning function.")
+        else:
+            # Update bases
+            V_m_transpose, V_n_transpose = V_m.transpose(1, 0), V_n.transpose(1, 0)
+            TV_m, TV_n = T_m @ V_m, T_n @ V_n
+            TV_m[TV_m < eps], TV_n[TV_n < eps] = eps, eps
+            division_m, TV_m_inverse = P_m / (TV_m**((domain + 2) / domain)), 1 / TV_m
+            division_n, TV_n_inverse = P_n / (TV_n**((domain + 2) / domain)), 1 / TV_n
+            TVV_m, TVV_n = TV_m_inverse @ V_m_transpose, TV_n_inverse @ V_n_transpose
+            TVV_m[TVV_m < eps], TVV_n[TVV_n < eps] = eps, eps
+            T_m = T_m * (division_m @ V_m_transpose / TVV_m)**(domain / (domain + 2))
+            T_n = T_n * (division_n @ V_n_transpose / TVV_n)**(domain / (domain + 2))
+
+            T_m_transpose, T_n_transpose = T_m.transpose(1, 0), T_n.transpose(1, 0)
+            TV_m, TV_n = T_m @ V_m, T_n @ V_n
+            TV_m[TV_m < eps], TV_n[TV_n < eps] = eps, eps
+            division_m, TV_m_inverse = P_m / (TV_m**((domain + 2) / domain)), 1 / TV_m
+            division_n, TV_n_inverse = P_n / (TV_n**((domain + 2) / domain)), 1 / TV_n
+            TTV_m, TTV_n = T_m_transpose @ TV_m_inverse, T_n_transpose @ TV_n_inverse
+            TTV_m[TTV_m < eps], TTV_n[TTV_n < eps] = eps, eps
+            V_m = V_m * (T_m_transpose @ division_m / TTV_m)**(domain / (domain + 2))
+            V_n = V_n * (T_n_transpose @ division_n / TTV_n)**(domain / (domain + 2))
+
+            T[m] = T_m
+            T[n] = T_n
+            V[m] = V_m
+            V[n] = V_n
+
+            self.base, self.activation = T, V
+    
+    def update_spatial_model_ip(self):
         n_sources, n_channels = self.n_sources, self.n_channels
         n_bins = self.n_bins
 
@@ -410,52 +497,153 @@ class GaussILRMA(ILRMAbase):
             TV = T @ V
             R = TV**(2 / domain) # (n_sources, n_bins, n_frames)
 
-        X, Y = self.input, self.estimation
+        X = self.input
+        W = self.demix_filter
+        R = R[..., np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
+        
+        X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+        X = X[..., np.newaxis]
+        X_Hermite = X.transpose(0, 1, 3, 2).conj()
+        XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+        R[R < eps] = eps
+        U = XX / R
+        U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
+        E = np.eye(n_sources, n_channels)
+        E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
 
-        if self.algorithm_spatial == 'IP':
-            W = self.demix_filter
-            R = R[..., np.newaxis, np.newaxis] # (n_sources, n_bins, n_frames, 1, 1)
-            
-            X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
-            X = X[..., np.newaxis]
-            X_Hermite = X.transpose(0, 1, 3, 2).conj()
-            XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
-            R[R < eps] = eps
-            U = XX / R
-            U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
-            E = np.eye(n_sources, n_channels)
-            E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
+        for source_idx in range(n_sources):
+            # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
+            w_n_Hermite = W[:, source_idx, :] # (n_bins, n_channels)
+            U_n = U[source_idx] # (n_bins, n_channels, n_channels)
+            WU = W @ U_n # (n_bins, n_sources, n_channels)
+            condition = np.linalg.cond(WU) < threshold # (n_bins,)
+            condition = condition[:, np.newaxis] # (n_bins, 1)
+            e_n = E[:, source_idx, :]
+            w_n = np.linalg.solve(WU, e_n)
+            wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
+            denominator = np.sqrt(wUw.squeeze(axis=-1))
+            w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
+            # if condition number is too big, `denominator[denominator < eps] = eps` may diverge of cost function.
+            W[:, source_idx, :] = w_n_Hermite
 
-            for source_idx in range(n_sources):
-                # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-                w_n_Hermite = W[:, source_idx, :] # (n_bins, n_channels)
-                U_n = U[source_idx] # (n_bins, n_channels, n_channels)
-                WU = W @ U_n # (n_bins, n_sources, n_channels)
-                condition = np.linalg.cond(WU) < threshold # (n_bins,)
-                condition = condition[:, np.newaxis] # (n_bins, 1)
-                e_n = E[:, source_idx, :]
-                w_n = np.linalg.solve(WU, e_n)
-                wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
-                denominator = np.sqrt(wUw[..., 0])
-                w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
-                # if condition number is too big, `denominator[denominator < eps] = eps` may diverge of cost function.
-                W[:, source_idx, :] = w_n_Hermite
+        self.demix_filter = W
 
-            self.demix_filter = W
-        elif self.algorithm_spatial == 'ISS':
-            R[R < eps] = eps # (n_sources, n_bins, n_frames)
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
+        
+        self.estimation = Y
+    
+    def update_spatial_model_iss(self):
+        n_sources = self.n_sources
 
-            for n in range(n_sources):
-                U_n = np.sum(Y * Y[n].conj() / R, axis=2) # (n_sources, n_bins)
-                D_n = np.sum(np.abs(Y[n])**2 / R, axis=2) # (n_sources, n_bins)
-                V_n = U_n / D_n # (n_sources, n_bins)
-                V_n[n] = 1 - 1 / np.sqrt(D_n[n])
-                Y = Y - V_n[:, :, np.newaxis] * Y[n]
-            
-            self.estimation = Y
+        domain = self.domain
+        eps = self.eps
+
+        if self.partitioning:
+            assert domain == 2, "Not support domain = {}".format(domain)
+
+            Z = self.latent
+            T, V = self.base, self.activation
+            R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
         else:
-            raise NotImplementedError("Not support {}-based spatial update.".format(self.algorithm_spatial))
+            T, V = self.base, self.activation
+            TV = T @ V
+            R = TV**(2 / domain) # (n_sources, n_bins, n_frames)
 
+        Y = self.estimation
+        R[R < eps] = eps # (n_sources, n_bins, n_frames)
+
+        for n in range(n_sources):
+            U_n = np.sum(Y * Y[n].conj() / R, axis=2) # (n_sources, n_bins)
+            D_n = np.sum(np.abs(Y[n])**2 / R, axis=2) # (n_sources, n_bins)
+            V_n = U_n / D_n # (n_sources, n_bins)
+            V_n[n] = 1 - 1 / np.sqrt(D_n[n])
+            Y = Y - V_n[:, :, np.newaxis] * Y[n]
+        
+        self.estimation = Y
+    
+    def update_spatial_model_pairwise(self):
+        n_channels = self.n_channels
+        n_bins = self.n_bins
+
+        domain = self.domain
+        eps, threshold = self.eps, self.threshold
+
+        if self.partitioning:
+            assert domain == 2, "Not support domain = {}".format(domain)
+
+            Z = self.latent
+            T, V = self.base, self.activation
+            R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
+        else:
+            T, V = self.base, self.activation
+            TV = T @ V
+            R = TV**(2 / domain) # (n_sources, n_bins, n_frames)
+
+        X = self.input
+        m, n = self.update_pair
+
+        W = self.demix_filter
+        R_m, R_n = R[m], R[n]
+        R_m, R_n = R_m[..., np.newaxis, np.newaxis], R_n[..., np.newaxis, np.newaxis] # (n_bins, n_frames, 1, 1)
+            
+        X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+        X = X[..., np.newaxis]
+        X_Hermite = X.transpose(0, 1, 3, 2).conj()
+        XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+        R_m[R_m < eps] = eps
+        R_n[R_n < eps] = eps
+        U_m, U_n = XX / R_m, XX / R_n
+        U_m, U_n = U_m.mean(axis=1), U_n.mean(axis=1) # (n_bins, n_channels, n_channels)
+        e_m, e_n = np.zeros((n_bins, n_channels, 1)), np.zeros((n_bins, n_channels, 1))
+        e_m[:, m, :] = 1
+        e_n[:, n, :] = 1
+        E_mn = np.concatenate([e_m, e_n], axis=2) # (n_bins, n_channels, 2)
+            
+        WU_m, WU_n = W @ U_m, W @ U_n # (n_bins, n_channels, n_channels)
+        condition_m, condition_n = np.linalg.cond(WU_m) < threshold, np.linalg.cond(WU_n) < threshold  # (n_bins,)
+        condition_m, condition_n = condition_m[:, np.newaxis], condition_n[:, np.newaxis]
+
+        WU_m_inv, WU_n_inv = np.linalg.inv(WU_m), np.linalg.inv(WU_n)
+        P_m, P_n = WU_m_inv @ E_mn, WU_n_inv @ E_mn # (n_bins, n_channels, n_channels), (n_bins, n_channels, 2) -> (n_bins, n_channels, 2)
+        P_m_Hermite, P_n_Hermite = P_m.transpose(0, 2, 1).conj(), P_n.transpose(0, 2, 1).conj()
+        V_m, V_n = P_m_Hermite @ U_m @ P_m, P_n_Hermite @ U_n @ P_n
+        VV = np.linalg.inv(V_n) @ V_m # (n_bins, 2, 2)
+        eig_values, v = np.linalg.eig(VV) # (n_bins, 2), # (n_bins, 2, 2)
+        order = np.argsort(eig_values, axis=-1)[:, ::-1] # (n_bins, 2)
+        v_transpose = v.swapaxes(-2, -1)
+        v_mn = _parallel_sort(v_transpose, order=order, axis=-2)
+        v_m, v_n = np.split(v_mn, 2, axis=1) # (n_bins, 1, 2), (n_bins, 1, 2)
+        v_m, v_n = v_m.squeeze(axis=1), v_n.squeeze(axis=1)
+        vUv_m, vUv_n = v_m[:, np.newaxis, :].conj() @ V_m @ v_m[:, :, np.newaxis], v_n[:, np.newaxis, :].conj() @ V_n @ v_n[:, :, np.newaxis]
+        denominator_m, denominator_n = np.sqrt(vUv_m.squeeze(axis=-1)), np.sqrt(vUv_n.squeeze(axis=-1))
+        v_m, v_n = v_m / denominator_m, v_n / denominator_n
+        w_m, w_n = P_m @ v_m[..., np.newaxis], P_n @ v_n[..., np.newaxis]
+        w_m, w_n = w_m.squeeze(axis=-1).conj(), w_n.squeeze(axis=-1).conj()
+
+        W[:, m, :] = np.where(condition_m, w_m, W[:, m, :])
+        W[:, n, :] = np.where(condition_n, w_n, W[:, n, :])
+
+        self.demix_filter = W
+        
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
+        
+        self.estimation = Y
+    
+    def _select_update_pair(self):
+        # For pairwise update
+        n_sources = self.n_sources
+
+        if self.update_pair is None:
+            m, n = 0, 1
+        else:
+            m, n = self.update_pair
+            m, n = m + 1, n + 1
+            m, n = m % n_sources, n % n_sources
+
+        self.update_pair = m, n
+        
     def compute_negative_loglikelihood(self):
         n_frames = self.n_frames
         domain = self.domain
@@ -626,7 +814,7 @@ class tILRMA(ILRMAbase):
         eps = self.eps
 
         self.update_source_model()
-        self.update_space_model()
+        self.update_spatial_model()
 
         if self.normalize:
             if self.algorithm_spatial == 'ISS':
@@ -748,7 +936,7 @@ class tILRMA(ILRMAbase):
 
             self.base, self.activation = T, V
     
-    def update_space_model(self):
+    def update_spatial_model(self):
         n_sources = self.n_sources
         nu = self.nu
         eps = self.eps
@@ -788,11 +976,16 @@ class tILRMA(ILRMAbase):
                 WU_inverse = np.linalg.inv(WU) # (n_bins, n_sources, n_channels)
                 w = WU_inverse[..., source_idx] # (n_bins, n_channels)
                 wUw = w[:, np.newaxis, :].conj() @ U_n @ w[:, :, np.newaxis]
-                denominator = np.sqrt(wUw[..., 0])
+                denominator = np.sqrt(wUw.squeeze(axis=-1))
                 denominator[denominator < eps] = eps
                 W[:, source_idx, :] = w.conj() / denominator
 
             self.demix_filter = W
+
+            X = self.input
+            Y = self.separate(X, demix_filter=W)
+            
+            self.estimation = Y
         else:
             raise ValueError("Not support {}-based spatial update.")
 
@@ -1013,7 +1206,7 @@ class ConsistentGaussILRMA(GaussILRMA):
         self.estimation = stft(y, fft_size=self.fft_size, hop_size=self.hop_size)
 
         self.update_source_model()
-        self.update_space_model()
+        self.update_spatial_model()
 
         if self.algorithm_spatial == 'ISS':
             X, Y = self.input, self.estimation
@@ -1037,6 +1230,29 @@ class ConsistentGaussILRMA(GaussILRMA):
 
         if self.demix_filter is not None:
             self.demix_filter = W
+
+def _parallel_sort(x, order, axis=-2):
+    """
+    Args:
+        x: (*, n_elements, *)
+        order: (*, order_elements)
+        axis <int>
+    Returns:
+        x_sorted: (*, n_elements, *)
+    """
+    repeats = np.prod(x.shape[:axis])
+    n_elements = x.shape[axis]
+    tensor_shape = x.shape[axis+1:]
+    order_elements = order.shape[-1]
+
+    x_flatten = x.reshape(-1, *tensor_shape)
+    order_flatten = order.reshape(-1)
+    tmp = n_elements * np.arange(repeats) # 2049 * np.arange(2049)
+    shift = np.repeat(tmp, order_elements)
+    x_sorted = x_flatten[order_flatten + shift]
+    x_sorted = x_sorted.reshape(*x.shape[:axis], order_elements, *tensor_shape)
+
+    return x_sorted
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])

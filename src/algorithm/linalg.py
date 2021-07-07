@@ -41,7 +41,7 @@ def _parallel_sort(x, order, axis=-2):
     repeats = np.prod(x.shape[:axis])
     n_elements = x.shape[axis]
     tensor_shape = x.shape[axis+1:]
-    order_elements = order.shape[axis]
+    order_elements = order.shape[-1]
 
     x_flatten = x.reshape(-1, *tensor_shape)
     order_flatten = order.reshape(-1)
