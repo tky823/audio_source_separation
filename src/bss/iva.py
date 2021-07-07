@@ -523,7 +523,7 @@ class AuxLaplaceIVA(AuxIVAbase):
     
     def update_once_iss(self):
         n_sources = self.n_sources
-        eps, = self.eps
+        eps = self.eps
 
         Y = self.estimation
 
