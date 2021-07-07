@@ -22,7 +22,7 @@ class ILRMAbase:
     """
     Independent Low-rank Matrix Analysis
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize=True, algorithm_spatial='IP', callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, n_basis=10, partitioning=False, normalize=True, algorithm_spatial='IP', callbacks=None, recordable_loss=True, eps=EPS):
         if callbacks is not None:
             if callable(callbacks):
                 callbacks = [callbacks]
@@ -31,7 +31,7 @@ class ILRMAbase:
             self.callbacks = None
         self.eps = eps
         
-        self.n_bases = n_bases
+        self.n_basis = n_basis
         self.partitioning = partitioning
         self.normalize = normalize
 
@@ -52,7 +52,7 @@ class ILRMAbase:
         for key in kwargs.keys():
             setattr(self, key, kwargs[key])
 
-        n_bases = self.n_bases
+        n_basis = self.n_basis
         eps = self.eps
 
         X = self.input
@@ -78,27 +78,27 @@ class ILRMAbase:
         if self.partitioning:
             if not hasattr(self, 'latent'):
                 variance_latent = 1e-2
-                Z = np.random.rand(n_sources, n_bases) * variance_latent + 1 / n_sources
+                Z = np.random.rand(n_sources, n_basis) * variance_latent + 1 / n_sources
                 Zsum = Z.sum(axis=0)
                 Zsum[Zsum < eps] = eps
                 self.latent = Z / Zsum
             else:
                 self.latent = self.latent.copy()
-            if not hasattr(self, 'base'):
-                self.base = np.random.rand(n_bins, n_bases)
+            if not hasattr(self, 'basis'):
+                self.basis = np.random.rand(n_bins, n_basis)
             else:
-                self.base = self.base.copy()
+                self.basis = self.basis.copy()
             if not hasattr(self, 'activation'):
-                self.activation = np.random.rand(n_bases, n_frames)
+                self.activation = np.random.rand(n_basis, n_frames)
             else:
                 self.activation = self.activation.copy()
         else:
-            if not hasattr(self, 'base'):
-                self.base = np.random.rand(n_sources, n_bins, n_bases)
+            if not hasattr(self, 'basis'):
+                self.basis = np.random.rand(n_sources, n_bins, n_basis)
             else:
-                self.base = self.base.copy()
+                self.basis = self.basis.copy()
             if not hasattr(self, 'activation'):
-                self.activation = np.random.rand(n_sources, n_bases, n_frames)
+                self.activation = np.random.rand(n_sources, n_basis, n_frames)
             else:
                 self.activation = self.activation.copy()
         
@@ -139,7 +139,7 @@ class ILRMAbase:
     
     def __repr__(self):
         s = "ILRMA("
-        s += "n_bases={n_bases}"
+        s += "n_basis={n_basis}"
         s += ", partitioning={partitioning}"
         s += ", normalize={normalize}"
         s += ")"
@@ -179,13 +179,13 @@ class GaussILRMA(ILRMAbase):
     Reference: "Determined Blind Source Separation Unifying Independent Vector Analysis and Nonnegative Matrix Factorization"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, domain=2, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_basis=10, domain=2, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
 
@@ -273,7 +273,7 @@ class GaussILRMA(ILRMAbase):
 
     def __repr__(self):
         s = "Gauss-ILRMA("
-        s += "n_bases={n_bases}"
+        s += "n_basis={n_basis}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
         s += ", normalize={normalize}"
@@ -298,7 +298,7 @@ class GaussILRMA(ILRMAbase):
                 Y = self.separate(X, demix_filter=W)
                 self.estimation = Y
             
-            T = self.base
+            T = self.basis
 
             if self.normalize == 'power':
                 P = np.abs(Y)**2
@@ -312,10 +312,10 @@ class GaussILRMA(ILRMAbase):
                 if self.partitioning:
                     Z = self.latent
                     
-                    Zaux = Z / (aux[:, np.newaxis]**domain) # (n_sources, n_bases)
-                    Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
-                    T = T * Zauxsum # (n_bins, n_bases)
-                    Z = Zaux / Zauxsum # (n_sources, n_bases)
+                    Zaux = Z / (aux[:, np.newaxis]**domain) # (n_sources, n_basis)
+                    Zauxsum = np.sum(Zaux, axis=0) # (n_basis,)
+                    T = T * Zauxsum # (n_bins, n_basis)
+                    Z = Zaux / Zauxsum # (n_sources, n_basis)
                     self.latent = Z
                 else:
                     T = T / (aux[:, np.newaxis, np.newaxis]**domain)
@@ -331,7 +331,7 @@ class GaussILRMA(ILRMAbase):
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
 
             self.estimation = Y
-            self.base = T
+            self.basis = T
 
             if self.demix_filter is not None:
                 self.demix_filter = W
@@ -367,48 +367,48 @@ class GaussILRMA(ILRMAbase):
         if self.partitioning:
             assert domain == 2, "Not support domain = {}".format(domain)
 
-            Z = self.latent # (n_sources, n_bases)
-            T, V = self.base, self.activation
+            Z = self.latent # (n_sources, n_basis)
+            T, V = self.basis, self.activation
 
-            TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
-            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_bases)
+            TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_basis, n_frames)
+            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_basis)
             ZTV = ZT @ V[np.newaxis, :, :] # (n_sources, n_bins, n_frames)
             ZTV[ZTV < eps] = eps
             division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
-            numerator = np.sum(division[:, :, np.newaxis, :] * TV, axis=(1, 3)) # (n_sources, n_bases)
-            denominator = np.sum(ZTV_inverse[:, :, np.newaxis, :] * TV, axis=(1, 3)) # (n_sources, n_bases)
+            numerator = np.sum(division[:, :, np.newaxis, :] * TV, axis=(1, 3)) # (n_sources, n_basis)
+            denominator = np.sum(ZTV_inverse[:, :, np.newaxis, :] * TV, axis=(1, 3)) # (n_sources, n_basis)
             denominator[denominator < eps] = eps
-            Z = np.sqrt(numerator / denominator) # (n_sources, n_bases)
-            Z = Z / Z.sum(axis=0) # (n_sources, n_bases)
+            Z = np.sqrt(numerator / denominator) # (n_sources, n_basis)
+            Z = Z / Z.sum(axis=0) # (n_sources, n_basis)
 
-            # Update bases
-            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_bases)
+            # Update basis
+            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_basis)
             ZTV = ZT @ V[np.newaxis, :, :] # (n_sources, n_bins, n_frames)
             ZTV[ZTV < eps] = eps
             division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
-            ZV = Z[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_sources, n_bases, n_frames)
-            numerator = np.sum(division[:, :, np.newaxis, :] * ZV[:, np.newaxis, :, :], axis=(0, 3)) # (n_bins, n_bases)
-            denominator = np.sum(ZTV_inverse[:, :, np.newaxis, :] * ZV[:, np.newaxis, :, :], axis=(0, 3)) # (n_bins, n_bases)
+            ZV = Z[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_sources, n_basis, n_frames)
+            numerator = np.sum(division[:, :, np.newaxis, :] * ZV[:, np.newaxis, :, :], axis=(0, 3)) # (n_bins, n_basis)
+            denominator = np.sum(ZTV_inverse[:, :, np.newaxis, :] * ZV[:, np.newaxis, :, :], axis=(0, 3)) # (n_bins, n_basis)
             denominator[denominator < eps] = eps
-            T = T * np.sqrt(numerator / denominator) # (n_bins, n_bases)
+            T = T * np.sqrt(numerator / denominator) # (n_bins, n_basis)
 
             # Update activations
-            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_bases)
+            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_basis)
             ZTV = ZT @ V[np.newaxis, :, :] # (n_sources, n_bins, n_frames)
             ZTV[ZTV < eps] = eps
             division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
-            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_bases)
-            numerator = np.sum(division[:, :, np.newaxis, :] * ZT[:, :, :, np.newaxis], axis=(0, 1)) # (n_bases, n_frames)
-            denominator = np.sum(ZTV_inverse[:, :, np.newaxis, :] * ZT[:, :, :, np.newaxis], axis=(0, 1)) # (n_bases, n_frames)
+            ZT = Z[:, np.newaxis, :] * T[np.newaxis, :, :] # (n_sources, n_bins, n_basis)
+            numerator = np.sum(division[:, :, np.newaxis, :] * ZT[:, :, :, np.newaxis], axis=(0, 1)) # (n_basis, n_frames)
+            denominator = np.sum(ZTV_inverse[:, :, np.newaxis, :] * ZT[:, :, :, np.newaxis], axis=(0, 1)) # (n_basis, n_frames)
             denominator[denominator < eps] = eps
-            V = V * np.sqrt(numerator / denominator) # (n_bins, n_bases)
+            V = V * np.sqrt(numerator / denominator) # (n_bins, n_basis)
 
             self.latent = Z
-            self.base, self.activation = T, V
+            self.basis, self.activation = T, V
         else:
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
 
-            # Update bases
+            # Update basis
             V_transpose = V.transpose(0, 2, 1)
             TV = T @ V
             TV[TV < eps] = eps
@@ -426,7 +426,7 @@ class GaussILRMA(ILRMAbase):
             TTV[TTV < eps] = eps
             V = V * (T_transpose @ division / TTV)**(domain / (domain + 2))
 
-            self.base, self.activation = T, V
+            self.basis, self.activation = T, V
 
     def update_source_model_pairwise(self):
         domain = self.domain
@@ -443,15 +443,15 @@ class GaussILRMA(ILRMAbase):
         Y_m, Y_n = Y[m], Y[n]
         P_m, P_n = np.abs(Y_m)**2, np.abs(Y_n)**2
 
-        T, V = self.base, self.activation
-        T_m, T_n = T[m], T[n] # (n_bins, n_bases), (n_bins, n_bases)
-        V_m, V_n = V[m], V[n] # (n_bases, n_frames), (n_bases, n_frames)
+        T, V = self.basis, self.activation
+        T_m, T_n = T[m], T[n] # (n_bins, n_basis), (n_bins, n_basis)
+        V_m, V_n = V[m], V[n] # (n_basis, n_frames), (n_basis, n_frames)
         
         if self.partitioning:
             assert domain == 2, "Not support domain = {}".format(domain)
             raise NotImplementedError("Not support partitioning function.")
         else:
-            # Update bases
+            # Update basis
             V_m_transpose, V_n_transpose = V_m.transpose(1, 0), V_n.transpose(1, 0)
             TV_m, TV_n = T_m @ V_m, T_n @ V_n
             TV_m[TV_m < eps], TV_n[TV_n < eps] = eps, eps
@@ -477,7 +477,7 @@ class GaussILRMA(ILRMAbase):
             V[m] = V_m
             V[n] = V_n
 
-            self.base, self.activation = T, V
+            self.basis, self.activation = T, V
     
     def update_spatial_model_ip(self):
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -490,10 +490,10 @@ class GaussILRMA(ILRMAbase):
             assert domain == 2, "Not support domain = {}".format(domain)
 
             Z = self.latent
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
         else:
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             TV = T @ V
             R = TV**(2 / domain) # (n_sources, n_bins, n_frames)
 
@@ -543,10 +543,10 @@ class GaussILRMA(ILRMAbase):
             assert domain == 2, "Not support domain = {}".format(domain)
 
             Z = self.latent
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
         else:
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             TV = T @ V
             R = TV**(2 / domain) # (n_sources, n_bins, n_frames)
 
@@ -573,10 +573,10 @@ class GaussILRMA(ILRMAbase):
             assert domain == 2, "Not support domain = {}".format(domain)
 
             Z = self.latent
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
         else:
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             TV = T @ V
             R = TV**(2 / domain) # (n_sources, n_bins, n_frames)
 
@@ -662,11 +662,11 @@ class GaussILRMA(ILRMAbase):
 
         if self.partitioning:
             Z = self.latent
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             ZTV = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
             R = ZTV**(2 / domain)
         else:
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             TV = T @ V # (n_sources, n_bins, n_frames)
             R = TV**(2 / domain)
         
@@ -680,14 +680,14 @@ class GGDILRMA(ILRMAbase):
     Reference: "Generalized independent low-rank matrix analysis using heavy-tailed distributions for blind source separation"
     See: https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-018-0549-5
     """
-    def __init__(self, n_bases=10, beta=1, domain=2, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, n_basis=10, beta=1, domain=2, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             beta: shape parameter. beta = 1: Laplace distribution, beta = 2: Gaussian distribution.
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.beta = beta
         self.domain = domain
@@ -699,7 +699,7 @@ class GGDILRMA(ILRMAbase):
     
     def __repr__(self):
         s = "GGD-ILRMA("
-        s += "n_bases={n_bases}"
+        s += "n_basis={n_basis}"
         s += ", beta={beta}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
@@ -714,14 +714,14 @@ class tILRMA(ILRMAbase):
     Reference: "Independent low-rank matrix analysis based on complex student's t-distribution for blind audio source separation"
     See: https://ieeexplore.ieee.org/document/8168129
     """
-    def __init__(self, n_bases=10, nu=1, domain=2, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, n_basis=10, nu=1, domain=2, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             nu: degree of freedom. nu = 1: Cauchy distribution, nu -> infty: Gaussian distribution.
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.nu = nu
         self.domain = domain
@@ -800,7 +800,7 @@ class tILRMA(ILRMAbase):
     
     def __repr__(self):
         s = "t-ILRMA("
-        s += "n_bases={n_bases}"
+        s += "n_basis={n_basis}"
         s += ", nu={nu}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
@@ -836,17 +836,17 @@ class tILRMA(ILRMAbase):
 
                 if self.partitioning:
                     Z = self.latent
-                    T = self.base
-                    Zaux = Z / (aux[:, np.newaxis]**2) # (n_sources, n_bases)
-                    Zauxsum = np.sum(Zaux, axis=0) # (n_bases,)
-                    T = T * Zauxsum # (n_bins, n_bases)
-                    Z = Zaux / Zauxsum # (n_sources, n_bases)
+                    T = self.basis
+                    Zaux = Z / (aux[:, np.newaxis]**2) # (n_sources, n_basis)
+                    Zauxsum = np.sum(Zaux, axis=0) # (n_basis,)
+                    T = T * Zauxsum # (n_bins, n_basis)
+                    Z = Zaux / Zauxsum # (n_sources, n_basis)
                     self.latent = Z
-                    self.base = T
+                    self.basis = T
                 else:
-                    T = self.base
+                    T = self.basis
                     T = T / (aux[:, np.newaxis, np.newaxis]**2)
-                    self.base = T
+                    self.basis = T
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
             
@@ -872,69 +872,69 @@ class tILRMA(ILRMAbase):
         
         if self.partitioning:
             raise NotImplementedError("Only support when `partitioning=False` ")
-            Z = self.latent # (n_sources, n_bases)
-            T, V = self.base, self.activation
+            Z = self.latent # (n_sources, n_basis)
+            T, V = self.basis, self.activation
 
-            TV = T[:,:,np.newaxis] * V[np.newaxis,:,:] # (n_bins, n_bases, n_frames)
-            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
+            TV = T[:,:,np.newaxis] * V[np.newaxis,:,:] # (n_bins, n_basis, n_frames)
+            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_basis)
             ZTV = ZT @ V[np.newaxis,:,:] # (n_sources, n_bins, n_frames)
             ZTV[ZTV < eps] = eps
             division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
-            numerator = np.sum(division[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_bases)
-            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_bases)
+            numerator = np.sum(division[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_basis)
+            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:,] * TV, axis=(1,3)) # (n_sources, n_basis)
             denominator[denominator < eps] = eps
-            Z = np.sqrt(numerator / denominator) # (n_sources, n_bases)
+            Z = np.sqrt(numerator / denominator) # (n_sources, n_basis)
             Zsum = Z.sum(axis=0)
-            Z = Z / Zsum # (n_sources, n_bases)
+            Z = Z / Zsum # (n_sources, n_basis)
 
-            # Update bases
-            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
+            # Update basis
+            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_basis)
             ZTV = ZT @ V[np.newaxis,:,:] # (n_sources, n_bins, n_frames)
             ZTV[ZTV < eps] = eps
             division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
-            ZV = Z[:,:,np.newaxis] * V[np.newaxis,:,:] # (n_sources, n_bases, n_frames)
-            numerator = np.sum(division[:,:,np.newaxis,:] * ZV[:,np.newaxis,:,:], axis=(0,3)) # (n_bins, n_bases)
-            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:] * ZV[:,np.newaxis,:,:], axis=(0,3)) # (n_bins, n_bases)
+            ZV = Z[:,:,np.newaxis] * V[np.newaxis,:,:] # (n_sources, n_basis, n_frames)
+            numerator = np.sum(division[:,:,np.newaxis,:] * ZV[:,np.newaxis,:,:], axis=(0,3)) # (n_bins, n_basis)
+            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:] * ZV[:,np.newaxis,:,:], axis=(0,3)) # (n_bins, n_basis)
             denominator[denominator < eps] = eps
-            T = T * np.sqrt(numerator / denominator) # (n_bins, n_bases)
+            T = T * np.sqrt(numerator / denominator) # (n_bins, n_basis)
 
             # Update activations
-            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
+            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_basis)
             ZTV = ZT @ V[np.newaxis,:,:] # (n_sources, n_bins, n_frames)
             ZTV[ZTV < eps] = eps
             division, ZTV_inverse = P / (ZTV**2), 1 / ZTV # (n_sources, n_bins, n_frames)
-            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_bases)
-            numerator = np.sum(division[:,:,np.newaxis,:] * ZT[:,:,:,np.newaxis], axis=(0,1)) # (n_bases, n_frames)
-            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:] * ZT[:,:,:,np.newaxis], axis=(0,1)) # (n_bases, n_frames)
+            ZT = Z[:,np.newaxis,:] * T[np.newaxis,:,:] # (n_sources, n_bins, n_basis)
+            numerator = np.sum(division[:,:,np.newaxis,:] * ZT[:,:,:,np.newaxis], axis=(0,1)) # (n_basis, n_frames)
+            denominator = np.sum(ZTV_inverse[:,:,np.newaxis,:] * ZT[:,:,:,np.newaxis], axis=(0,1)) # (n_basis, n_frames)
             denominator[denominator < eps] = eps
-            V = V * np.sqrt(numerator / denominator) # (n_bins, n_bases)
+            V = V * np.sqrt(numerator / denominator) # (n_bins, n_basis)
 
             self.latent = Z
-            self.base, self.activation = T, V
+            self.basis, self.activation = T, V
         else:
-            T, V = self.base, self.activation # (n_sources, n_bins, n_bases), (n_sources, n_bases, n_frames)
+            T, V = self.basis, self.activation # (n_sources, n_bins, n_basis), (n_sources, n_basis, n_frames)
 
-            # Update bases
-            V_transpose = V.transpose(0, 2, 1) # (n_sources, n_frames, n_bases)
+            # Update basis
+            V_transpose = V.transpose(0, 2, 1) # (n_sources, n_frames, n_basis)
             TV = T @ V # (n_sources, n_bins, n_frames)
             TV[TV < eps] = eps
             harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * P))
             division, TV_inverse = harmonic / (TV**2), 1 / TV # (n_sources, n_bins, n_frames), (n_sources, n_bins, n_frames)
-            TVV = TV_inverse @ V_transpose # (n_sources, n_bins, n_bases)
+            TVV = TV_inverse @ V_transpose # (n_sources, n_bins, n_basis)
             TVV[TVV < eps] = eps
-            T = T * np.sqrt(division @ V_transpose / TVV) # (n_sources, n_bins, n_bases)
+            T = T * np.sqrt(division @ V_transpose / TVV) # (n_sources, n_bins, n_basis)
 
             # Update activations
-            T_transpose = T.transpose(0, 2, 1) # (n_sources, n_bases, n_bins)
+            T_transpose = T.transpose(0, 2, 1) # (n_sources, n_basis, n_bins)
             TV = T @ V # (n_sources, n_bins, n_frames)
             TV[TV < eps] = eps
             harmonic = 1 / (2 / ((2 + nu) * TV) + nu / ((2 + nu) * P))
             division, TV_inverse = harmonic / (TV**2), 1 / TV # (n_sources, n_bins, n_frames)
-            TTV = T_transpose @ TV_inverse # (n_sources, n_bases, n_frames)
+            TTV = T_transpose @ TV_inverse # (n_sources, n_basis, n_frames)
             TTV[TTV < eps] = eps
-            V = V * np.sqrt(T_transpose @ division / TTV) # (n_sources, n_bases, n_frames)
+            V = V * np.sqrt(T_transpose @ division / TTV) # (n_sources, n_basis, n_frames)
 
-            self.base, self.activation = T, V
+            self.basis, self.activation = T, V
     
     def update_spatial_model(self):
         n_sources = self.n_sources
@@ -951,10 +951,10 @@ class tILRMA(ILRMAbase):
         
         if self.partitioning:
             Z = self.latent
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
         else:
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             R = T @ V
         
         if self.algorithm_spatial == 'IP':
@@ -1007,10 +1007,10 @@ class tILRMA(ILRMAbase):
 
         if self.partitioning:
             Z = self.latent
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             R = np.sum(Z[:, np.newaxis, :, np.newaxis] * T[:, :, np.newaxis] * V[np.newaxis, :, :], axis=2) # (n_sources, n_bins, n_frames)
         else:
-            T, V = self.base, self.activation
+            T, V = self.basis, self.activation
             R = T @ V # (n_sources, n_bins, n_frames)
         
         R[R < eps] = eps
@@ -1022,8 +1022,8 @@ class KLILRMA(ILRMAbase):
     """
     Reference: "Independent Low-Rank Matrix Analysis Based on Generalized Kullback-Leibler Divergence"
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+    def __init__(self, n_basis=10, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+        super().__init__(n_basis=n_basis, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
 
@@ -1071,7 +1071,7 @@ class KLILRMA(ILRMAbase):
     
     def __repr__(self):
         s = "KL-ILRMA("
-        s += "n_bases={n_bases}"
+        s += "n_basis={n_basis}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
         s += ", normalize={normalize}"
@@ -1085,12 +1085,12 @@ class RegularizedILRMA(ILRMAbase):
     Reference: "Blind source separation based on independent low-rank matrix analysis with sparse regularization for time-series activity"
     See https://ieeexplore.ieee.org/document/7486081
     """
-    def __init__(self, n_bases=10, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
+    def __init__(self, n_basis=10, partitioning=False, normalize='power', algorithm_spatial='IP', reference_id=0, callbacks=None, recordable_loss=True, eps=EPS):
         """
         Args:
             normalize <str>
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, partitioning=partitioning, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps)
 
         self.reference_id = reference_id
 
@@ -1103,13 +1103,13 @@ class ConsistentGaussILRMA(GaussILRMA):
     Reference: "Consistent independent low-rank matrix analysis for determined blind source separation"
     See https://asp-eurasipjournals.springeropen.com/articles/10.1186/s13634-020-00704-4
     """
-    def __init__(self, n_bases=10, partitioning=False, algorithm_spatial='IP', reference_id=0, fft_size=None, hop_size=None, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_basis=10, partitioning=False, algorithm_spatial='IP', reference_id=0, fft_size=None, hop_size=None, callbacks=None, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         """
         Args:
             normalize <str>: 'power': power based normalization, or 'projection-back': projection back based normalization.
             threshold <float>: threshold for condition number when computing (WU)^{-1}.
         """
-        super().__init__(n_bases=n_bases, partitioning=partitioning, normalize=False, algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
+        super().__init__(n_basis=n_basis, partitioning=partitioning, normalize=False, algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
 
         if fft_size is None:
             raise ValueError("Specify `fft_size`.")
@@ -1192,7 +1192,7 @@ class ConsistentGaussILRMA(GaussILRMA):
     
     def __repr__(self):
         s = "Consistent-GaussILRMA("
-        s += "n_bases={n_bases}"
+        s += "n_basis={n_basis}"
         s += ", domain={domain}"
         s += ", partitioning={partitioning}"
         s += ", normalize={normalize}"
@@ -1215,7 +1215,7 @@ class ConsistentGaussILRMA(GaussILRMA):
             X, W = self.input, self.demix_filter
             Y = self.separate(X, demix_filter=W)
         
-        T = self.base
+        T = self.basis
 
         if self.partitioning:
             raise NotImplementedError("Not support 'projection-back' based normalization for partitioninig function. Choose 'power' based normalization.")
@@ -1226,7 +1226,7 @@ class ConsistentGaussILRMA(GaussILRMA):
         T = T * np.abs(scale[..., np.newaxis])**2
 
         self.estimation = Y
-        self.base = T
+        self.basis = T
 
         if self.demix_filter is not None:
             self.demix_filter = W
@@ -1289,7 +1289,7 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
     return mixed_signals
 
-def _test_gauss_ilrma(algorithm_spatial, n_bases=10, domain=2, partitioning=False):
+def _test_gauss_ilrma(algorithm_spatial, n_basis=10, domain=2, partitioning=False):
     np.random.seed(111)
     
     # Room impulse response
@@ -1314,7 +1314,7 @@ def _test_gauss_ilrma(algorithm_spatial, n_bases=10, domain=2, partitioning=Fals
     n_channels = len(titles)
     iteration = 50
 
-    ilrma = GaussILRMA(n_bases=n_bases, domain=domain, partitioning=partitioning, algorithm_spatial=algorithm_spatial)
+    ilrma = GaussILRMA(n_basis=n_basis, domain=domain, partitioning=partitioning, algorithm_spatial=algorithm_spatial)
     print(ilrma)
     estimation = ilrma(mixture, iteration=iteration)
 
@@ -1333,8 +1333,7 @@ def _test_gauss_ilrma(algorithm_spatial, n_bases=10, domain=2, partitioning=Fals
     plt.savefig('data/ILRMA/GaussILRMA-{}/partitioning{}/loss.png'.format(algorithm_spatial, int(partitioning)), bbox_inches='tight')
     plt.close()
 
-
-def _test_t_ilrma(algorithm_spatial, n_bases=10, partitioning=False):
+def _test_t_ilrma(algorithm_spatial, n_basis=10, partitioning=False):
     np.random.seed(111)
     
     # Room impulse response
@@ -1359,7 +1358,7 @@ def _test_t_ilrma(algorithm_spatial, n_bases=10, partitioning=False):
     n_channels = len(titles)
     iteration = 50
     nu = 1000
-    ilrma = tILRMA(n_bases=n_bases, nu=nu, partitioning=partitioning, algorithm_spatial=algorithm_spatial)
+    ilrma = tILRMA(n_basis=n_basis, nu=nu, partitioning=partitioning, algorithm_spatial=algorithm_spatial)
     print(ilrma)
     estimation = ilrma(mixture, iteration=iteration)
 
@@ -1378,7 +1377,7 @@ def _test_t_ilrma(algorithm_spatial, n_bases=10, partitioning=False):
     plt.savefig('data/ILRMA/tILRMA-{}/partitioning{}/loss.png'.format(algorithm_spatial, int(partitioning)), bbox_inches='tight')
     plt.close()
 
-def _test_consistent_ilrma(n_bases=10, partitioning=False):
+def _test_consistent_ilrma(n_basis=10, partitioning=False):
     np.random.seed(111)
     
     # Room impulse response
@@ -1403,7 +1402,7 @@ def _test_consistent_ilrma(n_bases=10, partitioning=False):
     n_channels = len(titles)
     iteration = 50
     
-    ilrma = ConsistentGaussILRMA(n_bases=n_bases, partitioning=partitioning, fft_size=fft_size, hop_size=hop_size)
+    ilrma = ConsistentGaussILRMA(n_basis=n_basis, partitioning=partitioning, fft_size=fft_size, hop_size=hop_size)
     estimation = ilrma(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
@@ -1467,36 +1466,36 @@ if __name__ == '__main__':
 
     print("="*10, "Gauss-ILRMA (IP)", "="*10)
     print("-"*10, "without partitioning function", "-"*10)
-    _test_gauss_ilrma(algorithm_spatial='IP', n_bases=2, partitioning=False)
+    _test_gauss_ilrma(algorithm_spatial='IP', n_basis=2, partitioning=False)
     print()
 
     print("-"*10, "with partitioning function", "-"*10)
-    _test_gauss_ilrma(algorithm_spatial='IP', n_bases=5, partitioning=True)
+    _test_gauss_ilrma(algorithm_spatial='IP', n_basis=5, partitioning=True)
     print()
 
     print("="*10, "Gauss-ILRMA (ISS)", "="*10)
     print("-"*10, "without partitioning function", "-"*10)
-    _test_gauss_ilrma(algorithm_spatial='ISS', n_bases=2, partitioning=False)
+    _test_gauss_ilrma(algorithm_spatial='ISS', n_basis=2, partitioning=False)
     print()
 
     print("-"*10, "with partitioning function", "-"*10)
-    _test_gauss_ilrma(algorithm_spatial='ISS', n_bases=5, partitioning=True)
+    _test_gauss_ilrma(algorithm_spatial='ISS', n_basis=5, partitioning=True)
     print()
 
     print("="*10, "t-ILRMA (IP)", "="*10)
     print("-"*10, "without partitioning function", "-"*10)
-    _test_t_ilrma(algorithm_spatial='IP', n_bases=2, partitioning=False)
+    _test_t_ilrma(algorithm_spatial='IP', n_basis=2, partitioning=False)
     print()
-    # _test_t_ilrma(algorithm_spatial='IP', n_bases=5, partitioning=True)
+    # _test_t_ilrma(algorithm_spatial='IP', n_basis=5, partitioning=True)
     print()
 
     print("="*10, "t-ILRMA (ISS)", "="*10)
     print("-"*10, "without partitioning function", "-"*10)
-    # _test_t_ilrma(algorithm_spatial='ISS', n_bases=2, partitioning=False)
+    # _test_t_ilrma(algorithm_spatial='ISS', n_basis=2, partitioning=False)
     print()
-    # _test_t_ilrma(algorithm_spatial='ISS', n_bases=5, partitioning=True)
+    # _test_t_ilrma(algorithm_spatial='ISS', n_basis=5, partitioning=True)
     print()
 
     print("="*10, "Consistent-ILRMA", "="*10)
-    _test_consistent_ilrma(n_bases=5, partitioning=False)
+    _test_consistent_ilrma(n_basis=5, partitioning=False)
     print()
