@@ -527,6 +527,11 @@ class GaussILRMA(ILRMAbase):
             W[:, source_idx, :] = w_n_Hermite
 
         self.demix_filter = W
+
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
+        
+        self.estimation = Y
     
     def update_spatial_model_iss(self):
         n_sources = self.n_sources
@@ -620,6 +625,11 @@ class GaussILRMA(ILRMAbase):
         W[:, n, :] = np.where(condition_n, w_n, W[:, n, :])
 
         self.demix_filter = W
+        
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
+        
+        self.estimation = Y
     
     def _select_update_pair(self):
         # For pairwise update
@@ -971,6 +981,11 @@ class tILRMA(ILRMAbase):
                 W[:, source_idx, :] = w.conj() / denominator
 
             self.demix_filter = W
+
+            X = self.input
+            Y = self.separate(X, demix_filter=W)
+            
+            self.estimation = Y
         else:
             raise ValueError("Not support {}-based spatial update.")
 
