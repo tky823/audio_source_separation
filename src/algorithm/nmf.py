@@ -8,13 +8,13 @@ EPS=1e-12
 __metrics__ = ['EUC', 'KL', 'IS']
 
 class NMFbase:
-    def __init__(self, n_bases=2, eps=EPS):
+    def __init__(self, n_basis=2, eps=EPS):
         """
         Args:
-            n_bases: number of bases 
+            n_basis: number of basis
         """
 
-        self.n_bases = n_bases
+        self.n_basis = n_basis
         self.loss = []
 
         self.eps = eps
@@ -26,7 +26,7 @@ class NMFbase:
 
         self.update(iteration=iteration)
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
 
         return T.copy(), V.copy()
     
@@ -36,11 +36,11 @@ class NMFbase:
         for key in kwargs.keys():
             setattr(self, key, kwargs[key])
         
-        n_bases = self.n_bases
+        n_basis = self.n_basis
         n_bins, n_frames = self.target.shape
 
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
+        self.basis = np.random.rand(n_bins, n_basis)
+        self.activation = np.random.rand(n_basis, n_frames)
     
     def update(self, iteration=100):
         target = self.target
@@ -48,7 +48,7 @@ class NMFbase:
         for idx in range(iteration):
             self.update_once()
 
-            TV = self.base @ self.activation
+            TV = self.basis @ self.activation
             loss = self.criterion(TV, target)
             self.loss.append(loss.sum())
         
@@ -56,13 +56,13 @@ class NMFbase:
         raise NotImplementedError("Implement 'update_once' function")
 
 class ComplexNMFbase:
-    def __init__(self, n_bases=2, regularizer=0.1, eps=EPS):
+    def __init__(self, n_basis=2, regularizer=0.1, eps=EPS):
         """
         Args:
-            n_bases: number of bases 
+            n_basis: number of basis
         """
 
-        self.n_bases = n_bases
+        self.n_basis = n_basis
         self.regularizer = regularizer
         self.loss = []
 
@@ -75,7 +75,7 @@ class ComplexNMFbase:
         
         self.update(iteration=iteration)
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
         Phi = self.phase
 
         return T.copy(), V.copy(), Phi.copy()
@@ -86,19 +86,19 @@ class ComplexNMFbase:
         for key in kwargs.keys():
             setattr(self, key, kwargs[key])
         
-        n_bases = self.n_bases
+        n_basis = self.n_basis
         n_bins, n_frames = self.target.shape
 
-        self.base = np.random.rand(n_bins, n_bases)
-        self.activation = np.random.rand(n_bases, n_frames)
-        self.phase = 2 * np.pi * np.random.rand(n_bins, n_bases, n_frames)
+        self.basis = np.random.rand(n_bins, n_basis)
+        self.activation = np.random.rand(n_basis, n_frames)
+        self.phase = 2 * np.pi * np.random.rand(n_bins, n_basis, n_frames)
 
     def init_phase(self):
-        n_bases = self.n_bases
+        n_basis = self.n_basis
         target = self.target
 
         phase = np.angle(target)
-        self.phase = np.tile(phase[:,np.newaxis,:], reps=(1, n_bases, 1))
+        self.phase = np.tile(phase[:,np.newaxis,:], reps=(1, n_basis, 1))
     
     def update(self, iteration=100):
         target = self.target
@@ -106,7 +106,7 @@ class ComplexNMFbase:
         for idx in range(iteration):
             self.update_once()
 
-            TVPhi = np.sum(self.base[:,:,np.newaxis] * self.activation[:,np.newaxis,:] * self.phase, axis=1)
+            TVPhi = np.sum(self.basis[:,:,np.newaxis] * self.activation[:,np.newaxis,:] * self.phase, axis=1)
             loss = self.criterion(TVPhi, target)
             self.loss.append(loss.sum())
         
@@ -114,13 +114,13 @@ class ComplexNMFbase:
         raise NotImplementedError("Implement 'update_once' method")
 
 class MultichannelNMFbase:
-    def __init__(self, n_bases=2, eps=EPS):
+    def __init__(self, n_basis=2, eps=EPS):
         """
         Args:
-            n_bases: number of bases 
+            n_basis: number of basis
         """
 
-        self.n_bases = n_bases
+        self.n_basis = n_basis
         self.loss = []
 
         self.eps = eps
@@ -148,12 +148,12 @@ class MultichannelNMFbase:
         raise NotImplementedError("Implement `update_once` method.")
 
 class EUCNMF(NMFbase):
-    def __init__(self, n_bases=2, domain=2, algorithm='mm', eps=EPS):
+    def __init__(self, n_basis=2, domain=2, algorithm='mm', eps=EPS):
         """
         Args:
-            n_bases: number of bases
+            n_basis: number of basis
         """
-        super().__init__(n_bases=n_bases, eps=eps)
+        super().__init__(n_basis=n_basis, eps=eps)
 
         assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
         assert algorithm == 'mm', "algorithm must be 'mm'."
@@ -169,7 +169,7 @@ class EUCNMF(NMFbase):
         for idx in range(iteration):
             self.update_once()
 
-            TV = (self.base @ self.activation)**(2 / domain)
+            TV = (self.basis @ self.activation)**(2 / domain)
             loss = self.criterion(TV, target)
             self.loss.append(loss.sum())
 
@@ -184,9 +184,9 @@ class EUCNMF(NMFbase):
         domain = self.domain
         eps = self.eps
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
 
-        # Update bases
+        # Update basis
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
@@ -204,15 +204,15 @@ class EUCNMF(NMFbase):
         numerator = T_transpose @ (target * (TV**((2 - domain) / domain)))
         V = V * (numerator / TTV)**(domain / (4 - domain))
 
-        self.base, self.activation = T, V
+        self.basis, self.activation = T, V
 
 class KLNMF(NMFbase):
-    def __init__(self, n_bases=2, domain=2, algorithm='mm', eps=EPS):
+    def __init__(self, n_basis=2, domain=2, algorithm='mm', eps=EPS):
         """
         Args:
-            K: number of bases
+            K: number of basis
         """
-        super().__init__(n_bases=n_bases, eps=eps)
+        super().__init__(n_basis=n_basis, eps=eps)
 
         assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
         assert algorithm == 'mm', "algorithm must be 'mm'."
@@ -228,7 +228,7 @@ class KLNMF(NMFbase):
         for idx in range(iteration):
             self.update_once()
 
-            TV = (self.base @ self.activation)**(2 / domain)
+            TV = (self.basis @ self.activation)**(2 / domain)
             loss = self.criterion(TV, target)
             self.loss.append(loss.sum())
     
@@ -243,9 +243,9 @@ class KLNMF(NMFbase):
         domain = self.domain
         eps = self.eps
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
 
-        # Update bases
+        # Update basis
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
@@ -263,16 +263,16 @@ class KLNMF(NMFbase):
         division = target / TV
         V = V * (T_transpose @ division / TTV)**(domain / 2)
 
-        self.base, self.activation = T, V
+        self.basis, self.activation = T, V
 
 class ISNMF(NMFbase):
-    def __init__(self, n_bases=2, domain=2, algorithm='mm', eps=EPS):
+    def __init__(self, n_basis=2, domain=2, algorithm='mm', eps=EPS):
         """
         Args:
-            K: number of bases
+            K: number of basis
             algorithm: 'mm': MM algorithm based update
         """
-        super().__init__(n_bases=n_bases, eps=eps)
+        super().__init__(n_basis=n_basis, eps=eps)
 
         assert 1 <= domain <= 2, "1 <= `domain` <= 2 is not satisfied."
 
@@ -287,7 +287,7 @@ class ISNMF(NMFbase):
         for idx in range(iteration):
             self.update_once()
 
-            TV = (self.base @ self.activation)**(2 / domain)
+            TV = (self.basis @ self.activation)**(2 / domain)
             loss = self.criterion(TV, target)
             self.loss.append(loss.sum())
 
@@ -304,9 +304,9 @@ class ISNMF(NMFbase):
         domain = self.domain
         eps = self.eps
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
 
-        # Update bases
+        # Update basis
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
@@ -324,7 +324,7 @@ class ISNMF(NMFbase):
         TTV[TTV < eps] = eps
         V = V * (T_transpose @ division / TTV)**(domain / (domain + 2))
 
-        self.base, self.activation = T, V
+        self.basis, self.activation = T, V
     
     def update_once_me(self):
         target = self.target
@@ -333,9 +333,9 @@ class ISNMF(NMFbase):
 
         assert domain == 2, "Only domain = 2 is supported."
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
 
-        # Update bases
+        # Update basis
         V_transpose = V.transpose(1,0)
         TV = T @ V
         TV[TV < eps] = eps
@@ -353,16 +353,16 @@ class ISNMF(NMFbase):
         TTV[TTV < eps] = eps
         V = V * (T_transpose @ division / TTV)
 
-        self.base, self.activation = T, V
+        self.basis, self.activation = T, V
 
 class tNMF(NMFbase):
-    def __init__(self, n_bases=2, nu=1e+3, domain=2, algorithm='mm', eps=EPS):
+    def __init__(self, n_basis=2, nu=1e+3, domain=2, algorithm='mm', eps=EPS):
         """
         Args:
-            K: number of bases
+            K: number of basis
             algorithm: 'mm': MM algorithm based update
         """
-        super().__init__(n_bases=n_bases, eps=eps)
+        super().__init__(n_basis=n_basis, eps=eps)
 
         def t_divergence(input, target):
             # TODO: implement criterion
@@ -384,7 +384,7 @@ class tNMF(NMFbase):
         for idx in range(iteration):
             self.update_once()
 
-            TV = (self.base @ self.activation)**(2 / domain)
+            TV = (self.basis @ self.activation)**(2 / domain)
             loss = self.criterion(TV, target)
             self.loss.append(loss.sum())
 
@@ -402,10 +402,10 @@ class tNMF(NMFbase):
 
         assert domain == 2, "`domain` is expected 2."
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
         Z = np.maximum(target, eps)
 
-        # Update bases
+        # Update basis
         V_transpose = V.transpose(1, 0)
         TV = T @ V
         TV[TV < eps] = eps
@@ -425,11 +425,11 @@ class tNMF(NMFbase):
         TTV[TTV < eps] = eps
         V = V * np.sqrt(T_transpose @ division / TTV)
 
-        self.base, self.activation = T, V
+        self.basis, self.activation = T, V
 
 class CauchyNMF(NMFbase):
-    def __init__(self, n_bases, domain=2, algorithm='naive-multipricative', eps=EPS):
-        super().__init__(n_bases=n_bases, eps=eps)
+    def __init__(self, n_basis, domain=2, algorithm='naive-multipricative', eps=EPS):
+        super().__init__(n_basis=n_basis, eps=eps)
 
         def cauchy_divergence(input, target):
             eps = self.eps
@@ -469,7 +469,7 @@ class CauchyNMF(NMFbase):
 
         assert domain == 2, "Only 'domain' = 2 is supported."
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
 
         TV = T @ V
         TV[TV < eps] = eps
@@ -491,7 +491,7 @@ class CauchyNMF(NMFbase):
         denominator[denominator < eps] = eps
         V = V * (numerator / denominator)
 
-        self.base, self.activation = T, V
+        self.basis, self.activation = T, V
 
     def update_once_mm(self):
         target = self.target
@@ -500,7 +500,7 @@ class CauchyNMF(NMFbase):
 
         assert domain == 2, "Only 'domain' = 2 is supported."
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
 
         TV = T @ V
         TV[TV < eps] = eps
@@ -522,7 +522,7 @@ class CauchyNMF(NMFbase):
         denominator[denominator < eps] = eps
         V = V * np.sqrt(numerator / denominator)
 
-        self.base, self.activation = T, V
+        self.basis, self.activation = T, V
     
     def update_once_me(self):
         """
@@ -535,7 +535,7 @@ class CauchyNMF(NMFbase):
 
         assert domain == 2, "Only 'domain' = 2 is supported."
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
         
         TV = T @ V
         TV2Z = TV**2 + target
@@ -555,7 +555,7 @@ class CauchyNMF(NMFbase):
         denominator[denominator < eps] = eps
         V = V * (B / denominator)
 
-        self.base, self.activation = T, V
+        self.basis, self.activation = T, V
 
     def update_once_mm_fast(self):
         target = self.target
@@ -564,9 +564,9 @@ class CauchyNMF(NMFbase):
 
         assert domain == 2, "Only 'domain' = 2 is supported."
 
-        T, V = self.base, self.activation
+        T, V = self.basis, self.activation
 
-        # Update bases
+        # Update basis
         TV = T @ V
         C = 2 * target + TV**2
         CTV = C * TV
@@ -579,7 +579,7 @@ class CauchyNMF(NMFbase):
         denominator[denominator < eps] = eps
         T = T * np.sqrt(numerator / denominator)
 
-        # Update bases
+        # Update basis
         TV = T @ V
         C = 2 * target + TV**2
         CTV = C * TV
@@ -592,15 +592,15 @@ class CauchyNMF(NMFbase):
         denominator[denominator < eps] = eps
         V = V * np.sqrt(numerator / denominator)
 
-        self.base, self.activation = T, V
+        self.basis, self.activation = T, V
 
 class ComplexEUCNMF(ComplexNMFbase):
-    def __init__(self, n_bases=2, regularizer=0.1, p=1, eps=EPS):
+    def __init__(self, n_basis=2, regularizer=0.1, p=1, eps=EPS):
         """
         Args:
-            n_bases: number of bases
+            n_basis: number of basis
         """
-        super().__init__(n_bases=n_bases, eps=eps)
+        super().__init__(n_basis=n_basis, eps=eps)
 
         self.criterion = lambda input, target: np.abs(input - target)**2
         self.regularizer, self.p = regularizer, p
@@ -617,7 +617,7 @@ class ComplexEUCNMF(ComplexNMFbase):
         for idx in range(iteration):
             self.update_once()
 
-            TVPhi = np.sum(self.base[:,:,np.newaxis] * self.activation[np.newaxis,:,:] * self.phase, axis=1)
+            TVPhi = np.sum(self.basis[:,:,np.newaxis] * self.activation[np.newaxis,:,:] * self.phase, axis=1)
             loss = self.criterion(TVPhi, target)
             self.loss.append(loss.sum())
     
@@ -626,7 +626,7 @@ class ComplexEUCNMF(ComplexNMFbase):
         regularizer, p = self.regularizer, self.p
         eps = self.eps
 
-        T, V, Phi = self.base, self.activation, self.phase
+        T, V, Phi = self.basis, self.activation, self.phase
         Ephi = np.exp(1j * Phi)
         Beta = self.Beta
         Beta[Beta < eps] = eps
@@ -639,11 +639,11 @@ class ComplexEUCNMF(ComplexNMFbase):
         V_bar[V_bar < eps] = eps
         Re = np.real(Z_bar.conj() * Ephi)
 
-        # Update bases
+        # Update basis
         VV = V**2
         numerator = (V[np.newaxis,:,:] / Beta) * Re
         numerator = numerator.sum(axis=2)
-        denominator = np.sum(VV[np.newaxis,:,:] / Beta, axis=2) # (n_bins, n_bases)
+        denominator = np.sum(VV[np.newaxis,:,:] / Beta, axis=2) # (n_bins, n_basis)
         denominator[denominator < eps] = eps
         T = numerator / denominator
 
@@ -651,26 +651,26 @@ class ComplexEUCNMF(ComplexNMFbase):
         TT = T**2
         numerator = (T[:,:,np.newaxis] / Beta) * Re
         numerator = numerator.sum(axis=0)
-        denominator = np.sum(TT[:,:,np.newaxis] / Beta, axis=0) + regularizer * p * V_bar**(p - 2) # (n_bases, n_frames)
+        denominator = np.sum(TT[:,:,np.newaxis] / Beta, axis=0) + regularizer * p * V_bar**(p - 2) # (n_basis, n_frames)
         denominator[denominator < eps] = eps
         V = numerator / denominator
 
         # Update phase    
         phase = np.angle(Z_bar)
 
-        # Normalize bases
+        # Normalize basis
         T = T / T.sum(axis=0)
 
-        self.base, self.activation, self.phase = T, V, phase
+        self.basis, self.activation, self.phase = T, V, phase
 
         # Update beta
         self.update_beta()
     
     def update_beta(self):
-        T, V = self.base[:,:,np.newaxis], self.activation[np.newaxis,:,:]
+        T, V = self.basis[:,:,np.newaxis], self.activation[np.newaxis,:,:]
         eps = self.eps
 
-        TV = T * V # (n_bins, n_bases, n_frames)
+        TV = T * V # (n_bins, n_basis, n_frames)
         TVsum = TV.sum(axis=1, keepdims=True)
         TVsum[TVsum < eps] = eps
         self.Beta = TV / TVsum
@@ -680,13 +680,13 @@ class MultichannelISNMF(MultichannelNMFbase):
     Reference: "Multichannel Extensions of Non-Negative Matrix Factorization With Complex-Valued Data"
     See https://ieeexplore.ieee.org/document/5229304
     """
-    def __init__(self, n_bases=10, normalize=True, eps=EPS):
+    def __init__(self, n_basis=10, normalize=True, eps=EPS):
         """
         Args:
-            n_bases
+            n_basis
             eps <float>: Machine epsilon
         """
-        super().__init__(n_bases=n_bases, eps=eps)
+        super().__init__(n_basis=n_basis, eps=eps)
 
         self.criterion = multichannel_is_divergence
         self.normalize = normalize
@@ -698,14 +698,14 @@ class MultichannelISNMF(MultichannelNMFbase):
 
         self.update(target, iteration=iteration)
 
-        H, T, V = self.spatial, self.base, self.activation
+        H, T, V = self.spatial, self.basis, self.activation
 
         return H.copy(), T.copy(), V.copy()
     
     def _reset(self, **kwargs):
         super()._reset(**kwargs)
 
-        n_bases = self.n_bases
+        n_basis = self.n_basis
         n_bins, n_frames, n_channels, _n_channels = self.target.shape
 
         assert _n_channels == n_channels, "Invalid input shape"
@@ -715,15 +715,15 @@ class MultichannelISNMF(MultichannelNMFbase):
     
         if not hasattr(self, 'spatial'):
             H = np.eye(n_channels)
-            self.spatial = np.tile(H, reps=(n_bins, n_bases, 1, 1))
+            self.spatial = np.tile(H, reps=(n_bins, n_basis, 1, 1))
         else:
             self.spatial = self.spatial.copy()
-        if not hasattr(self, 'base'):
-            self.base = np.random.rand(n_bins, n_bases)
+        if not hasattr(self, 'basis'):
+            self.basis = np.random.rand(n_bins, n_basis)
         else:
-            self.base = self.base.copy()
+            self.basis = self.basis.copy()
         if not hasattr(self, 'activation'):
-            self.activation = np.random.rand(n_bases, n_frames)
+            self.activation = np.random.rand(n_basis, n_frames)
         else:
             self.activation = self.activation.copy()
 
@@ -736,47 +736,47 @@ class MultichannelISNMF(MultichannelNMFbase):
             self.loss.append(loss.sum())
     
     def update_once(self):
-        self.update_base()
+        self.update_basis()
         self.update_activation()
         self.update_spatial()
     
-    def update_base(self):
+    def update_basis(self):
         n_channels = self.n_channels
         eps = self.eps
 
         X = self.target # (n_bins, n_frames, n_channels, n_channels)
-        H = self.spatial # (n_bins, n_bases, n_channels, n_channels)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
+        H = self.spatial # (n_bins, n_basis, n_channels, n_channels)
+        T, V = self.basis, self.activation # (n_bins, n_basis), (n_basis, n_frames)
 
         X_hat = self.reconstruct()
         inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
         XXX = inv_X_hat @ X @ inv_X_hat # (n_bins, n_frames, n_channels, n_channels)
         
-        numerator = np.trace(XXX[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_bases, 1, n_channels, n_channels) -> (n_bins, n_bases, n_frames)
-        numerator = np.sum(V * numerator, axis=2) # (n_bins, n_bases)
-        denominator = np.trace(inv_X_hat[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_bases, 1, n_channels, n_channels) -> (n_bins, n_bases, n_frames)
-        denominator = np.sum(V * denominator, axis=2) # (n_bins, n_bases, n_bases)
+        numerator = np.trace(XXX[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_basis, 1, n_channels, n_channels) -> (n_bins, n_basis, n_frames)
+        numerator = np.sum(V * numerator, axis=2) # (n_bins, n_basis)
+        denominator = np.trace(inv_X_hat[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_basis, 1, n_channels, n_channels) -> (n_bins, n_basis, n_frames)
+        denominator = np.sum(V * denominator, axis=2) # (n_bins, n_basis, n_basis)
         denominator[denominator < eps] = eps
 
         T = T * np.sqrt(numerator / denominator)
-        self.base = T
+        self.basis = T
 
     def update_activation(self):
         n_channels = self.n_channels
         eps = self.eps
 
         X = self.target # (n_bins, n_frames, n_channels, n_channels)
-        H = self.spatial # (n_bins, n_bases, n_channels, n_channels)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
+        H = self.spatial # (n_bins, n_basis, n_channels, n_channels)
+        T, V = self.basis, self.activation # (n_bins, n_basis), (n_basis, n_frames)
 
         X_hat = self.reconstruct()
         inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
         XXX = inv_X_hat @ X @ inv_X_hat # (n_bins, n_frames, n_channels, n_channels)
 
-        numerator = np.trace(XXX[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_bases, 1, n_channels, n_channels) -> (n_bins, n_bases, n_frames)
-        numerator = np.sum(T[:, :, np.newaxis] * numerator, axis=0) # (n_bases, n_frames)
-        denominator = np.trace(inv_X_hat[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_bases, 1, n_channels, n_channels) -> (n_bins, n_bases, n_frames)
-        denominator = np.sum(T[:, :, np.newaxis] * denominator, axis=0) # (n_bases, n_frames)
+        numerator = np.trace(XXX[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_basis, 1, n_channels, n_channels) -> (n_bins, n_basis, n_frames)
+        numerator = np.sum(T[:, :, np.newaxis] * numerator, axis=0) # (n_basis, n_frames)
+        denominator = np.trace(inv_X_hat[:, np.newaxis, :, :, :] @ H[:, :, np.newaxis, :, :], axis1=-2, axis2=-1).real # (n_bins, 1, n_frames, n_channels, n_channels), (n_bins, n_basis, 1, n_channels, n_channels) -> (n_bins, n_basis, n_frames)
+        denominator = np.sum(T[:, :, np.newaxis] * denominator, axis=0) # (n_basis, n_frames)
         denominator[denominator < eps] = eps
 
         V = V * np.sqrt(numerator / denominator)
@@ -787,15 +787,15 @@ class MultichannelISNMF(MultichannelNMFbase):
         eps = self.eps
 
         X = self.target # (n_bins, n_frames, n_channels, n_channels)
-        H = self.spatial # (n_bins, n_bases, n_channels, n_channels)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
+        H = self.spatial # (n_bins, n_basis, n_channels, n_channels)
+        T, V = self.basis, self.activation # (n_bins, n_basis), (n_basis, n_frames)
 
         X_hat = self.reconstruct()
         inv_X_hat = np.linalg.inv(X_hat + eps * np.eye(n_channels)) # (n_bins, n_frames, n_channels, n_channels)
         XXX = inv_X_hat @ X @ inv_X_hat # (n_bins, n_frames, n_channels, n_channels)
-        VXXX = np.sum(V[np.newaxis, :, :, np.newaxis, np.newaxis] * XXX[:, np.newaxis, :, :, :], axis=2) # (n_bins, n_bases, n_channels, n_channels)
+        VXXX = np.sum(V[np.newaxis, :, :, np.newaxis, np.newaxis] * XXX[:, np.newaxis, :, :, :], axis=2) # (n_bins, n_basis, n_channels, n_channels)
         
-        A = np.sum(V[np.newaxis, :, :, np.newaxis, np.newaxis] * inv_X_hat[:, np.newaxis, :, :, :], axis=2) # (n_bins, bases, n_channels, n_channels)
+        A = np.sum(V[np.newaxis, :, :, np.newaxis, np.newaxis] * inv_X_hat[:, np.newaxis, :, :, :], axis=2) # (n_bins, nbasis, n_channels, n_channels)
         B = H @ VXXX @ H
         H = solve_Riccati(A, B)
         H = H + eps * np.eye(n_channels)
@@ -806,10 +806,10 @@ class MultichannelISNMF(MultichannelNMFbase):
         self.spatial = H
     
     def reconstruct(self):
-        H = self.spatial # (n_bins, n_bases, n_channels, n_channels)
-        T, V = self.base, self.activation # (n_bins, n_bases), (n_bases, n_frames)
+        H = self.spatial # (n_bins, n_basis, n_channels, n_channels)
+        T, V = self.basis, self.activation # (n_bins, n_basis), (n_basis, n_frames)
 
-        TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_bases, n_frames)
+        TV = T[:, :, np.newaxis] * V[np.newaxis, :, :] # (n_bins, n_basis, n_frames)
         X_hat = np.sum(H[:, :, np.newaxis, :, :] * TV[:, :, :, np.newaxis, np.newaxis], axis=1) # (n_bins, n_frames, n_channels, n_channels)
         
         return X_hat
@@ -825,7 +825,7 @@ def _test(metric='EUC', algorithm='mm'):
     np.random.seed(111)
 
     fft_size, hop_size = 1024, 256
-    n_bases = 6
+    n_basis = 6
     domain = 2
     iteration = 100
     
@@ -839,29 +839,29 @@ def _test(metric='EUC', algorithm='mm'):
 
     if metric == 'EUC':
         iteration = 80
-        nmf = EUCNMF(n_bases, domain=domain, algorithm=algorithm)
+        nmf = EUCNMF(n_basis, domain=domain, algorithm=algorithm)
     elif metric == 'KL':
         iteration = 50
         domain = 1.5
-        nmf = KLNMF(n_bases, domain=domain, algorithm=algorithm)
+        nmf = KLNMF(n_basis, domain=domain, algorithm=algorithm)
     elif metric == 'IS':
         iteration = 50
-        nmf = ISNMF(n_bases, domain=domain, algorithm=algorithm)
+        nmf = ISNMF(n_basis, domain=domain, algorithm=algorithm)
     elif metric == 't':
         iteration = 50
         nu = 100
-        nmf = tNMF(n_bases, nu=nu, domain=domain, algorithm=algorithm)
+        nmf = tNMF(n_basis, nu=nu, domain=domain, algorithm=algorithm)
     elif metric == 'Cauchy':
         iteration = 20
-        nmf = CauchyNMF(n_bases, domain=domain, algorithm=algorithm)
+        nmf = CauchyNMF(n_basis, domain=domain, algorithm=algorithm)
     else:
         raise NotImplementedError("Not support {}-NMF".format(metric))
 
-    base, activation = nmf(power, iteration=iteration)
+    basis, activation = nmf(power, iteration=iteration)
 
     amplitude[amplitude < EPS] = EPS
 
-    estimated_power = (base @ activation)**(2 / domain)
+    estimated_power = (basis @ activation)**(2 / domain)
     estimated_amplitude = np.sqrt(estimated_power)
     ratio = estimated_amplitude / amplitude
     estimated_spectrogram = ratio * spectrogram
@@ -879,15 +879,15 @@ def _test(metric='EUC', algorithm='mm'):
     plt.savefig('data/NMF/spectrogram.png', bbox_inches='tight')
     plt.close()
 
-    for idx in range(n_bases):
-        estimated_power = (base[:, idx: idx+1] @ activation[idx: idx+1, :])**(2 / domain)
+    for idx in range(n_basis):
+        estimated_power = (basis[:, idx: idx+1] @ activation[idx: idx+1, :])**(2 / domain)
         estimated_amplitude = np.sqrt(estimated_power)
         ratio = estimated_amplitude / amplitude
         estimated_spectrogram = ratio * spectrogram
 
         estimated_signal = istft(estimated_spectrogram, fft_size=fft_size, hop_size=hop_size, length=T)
         estimated_signal = estimated_signal / np.abs(estimated_signal).max()
-        write_wav("data/NMF/{}/{}/music-8000-estimated-iter{}-base{}.wav".format(metric, algorithm, iteration, idx), signal=estimated_signal, sr=sr)
+        write_wav("data/NMF/{}/{}/music-8000-estimated-iter{}-{}.wav".format(metric, algorithm, iteration, idx), signal=estimated_signal, sr=sr)
 
         estimated_power[estimated_power < EPS] = EPS
         log_spectrogram = 10 * np.log10(estimated_power)
@@ -895,7 +895,7 @@ def _test(metric='EUC', algorithm='mm'):
         plt.figure()
         plt.pcolormesh(log_spectrogram, cmap='jet')
         plt.colorbar()
-        plt.savefig('data/NMF/{}/{}/estimated-spectrogram-iter{}-base{}.png'.format(metric, algorithm, iteration, idx), bbox_inches='tight')
+        plt.savefig('data/NMF/{}/{}/estimated-spectrogram-iter{}-basis{}.png'.format(metric, algorithm, iteration, idx), bbox_inches='tight')
         plt.close()
     
     plt.figure()
@@ -909,7 +909,7 @@ def _test_cnmf(metric='EUC'):
     np.random.seed(111)
 
     fft_size, hop_size = 1024, 256
-    n_bases = 6
+    n_basis = 6
     p = 1.2
     iteration = 100
     
@@ -917,16 +917,16 @@ def _test_cnmf(metric='EUC'):
     T = len(signal)
     spectrogram = stft(signal, fft_size=fft_size, hop_size=hop_size)
     
-    regularizer = 1e-5 * np.sum(np.abs(spectrogram)**2) / (n_bases**(1 - 2 / p))
+    regularizer = 1e-5 * np.sum(np.abs(spectrogram)**2) / (n_basis**(1 - 2 / p))
     
     if metric == 'EUC':
-        nmf = ComplexEUCNMF(n_bases, regularizer=regularizer, p=p)
+        nmf = ComplexEUCNMF(n_basis, regularizer=regularizer, p=p)
     else:
         raise NotImplementedError("Not support {}-NMF".format(metric))
     
-    base, activation, phase = nmf(spectrogram, iteration=iteration)
+    basis, activation, phase = nmf(spectrogram, iteration=iteration)
 
-    estimated_spectrogram = base[:,:,np.newaxis] * activation[np.newaxis,:,:] * np.exp(1j*phase)
+    estimated_spectrogram = basis[:,:,np.newaxis] * activation[np.newaxis,:,:] * np.exp(1j*phase)
     estimated_spectrogram = estimated_spectrogram.sum(axis=1)
     estimated_signal = istft(estimated_spectrogram, fft_size=fft_size, hop_size=hop_size, length=T)
     estimated_signal = estimated_signal / np.abs(estimated_signal).max()
@@ -942,12 +942,12 @@ def _test_cnmf(metric='EUC'):
     plt.savefig('data/CNMF/spectrogram.png', bbox_inches='tight')
     plt.close()
 
-    for idx in range(n_bases):
-        estimated_spectrogram = base[:, idx: idx + 1] * activation[idx: idx + 1, :] * phase[:, idx, :]
+    for idx in range(n_basis):
+        estimated_spectrogram = basis[:, idx: idx + 1] * activation[idx: idx + 1, :] * phase[:, idx, :]
 
         estimated_signal = istft(estimated_spectrogram, fft_size=fft_size, hop_size=hop_size, length=T)
         estimated_signal = estimated_signal / np.abs(estimated_signal).max()
-        write_wav("data/CNMF/{}/music-8000-estimated-iter{}-base{}.wav".format(metric, iteration, idx), signal=estimated_signal, sr=sr)
+        write_wav("data/CNMF/{}/music-8000-estimated-iter{}-basis{}.wav".format(metric, iteration, idx), signal=estimated_signal, sr=sr)
 
         estimated_power = np.abs(estimated_spectrogram)**2
         estimated_power[estimated_power < EPS] = EPS
@@ -956,7 +956,7 @@ def _test_cnmf(metric='EUC'):
         plt.figure()
         plt.pcolormesh(log_spectrogram, cmap='jet')
         plt.colorbar()
-        plt.savefig('data/CNMF/{}/estimated-spectrogram-iter{}-base{}.png'.format(metric, iteration, idx), bbox_inches='tight')
+        plt.savefig('data/CNMF/{}/estimated-spectrogram-iter{}-basis{}.png'.format(metric, iteration, idx), bbox_inches='tight')
         plt.close()
     
     plt.figure()
