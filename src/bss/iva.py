@@ -541,7 +541,61 @@ class AuxLaplaceIVA(AuxIVAbase):
         self.estimation = Y
 
     def update_once_pairwise(self):
-        raise ValueError("in progress...")
+        n_channels = self.n_channels
+        n_bins = self.n_bins
+        eps, threshold = self.eps, self.threshold
+
+        X, Y = self.input, self.estimation
+        W = self.demix_filter
+        m, n = self.update_pair
+
+        Y_m, Y_n = Y[m], Y[n]
+        P_m, P_n = np.abs(Y_m)**2, np.abs(Y_n)**2 # (n_bins, n_frames)
+        R_m, R_n = np.sqrt(P_m.sum(axis=0)), np.sqrt(P_n.sum(axis=0)) # (n_frames,)
+        R_m, R_n = R_m[np.newaxis, ..., np.newaxis, np.newaxis], R_n[np.newaxis, ..., np.newaxis, np.newaxis] # (1, n_frames, 1, 1)
+            
+        X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+        X = X[..., np.newaxis]
+        X_Hermite = X.transpose(0, 1, 3, 2).conj()
+        XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
+        R_m[R_m < eps] = eps
+        R_n[R_n < eps] = eps
+        U_m, U_n = XX / R_m, XX / R_n
+        U_m, U_n = U_m.mean(axis=1), U_n.mean(axis=1) # (n_bins, n_channels, n_channels)
+        e_m, e_n = np.zeros((n_bins, n_channels, 1)), np.zeros((n_bins, n_channels, 1))
+        e_m[:, m, :], e_n[:, n, :] = 1, 1
+        E_mn = np.concatenate([e_m, e_n], axis=2) # (n_bins, n_channels, 2)
+            
+        WU_m, WU_n = W @ U_m, W @ U_n # (n_bins, n_channels, n_channels)
+        condition_m, condition_n = np.linalg.cond(WU_m) < threshold, np.linalg.cond(WU_n) < threshold  # (n_bins,)
+        condition_m, condition_n = condition_m[:, np.newaxis], condition_n[:, np.newaxis]
+
+        WU_m_inv, WU_n_inv = np.linalg.inv(WU_m), np.linalg.inv(WU_n)
+        P_m, P_n = WU_m_inv @ E_mn, WU_n_inv @ E_mn # (n_bins, n_channels, n_channels), (n_bins, n_channels, 2) -> (n_bins, n_channels, 2)
+        P_m_Hermite, P_n_Hermite = P_m.transpose(0, 2, 1).conj(), P_n.transpose(0, 2, 1).conj()
+        V_m, V_n = P_m_Hermite @ U_m @ P_m, P_n_Hermite @ U_n @ P_n
+        VV = np.linalg.inv(V_n) @ V_m # (n_bins, 2, 2)
+        eig_values, v = np.linalg.eig(VV) # (n_bins, 2), # (n_bins, 2, 2)
+        order = np.argsort(eig_values, axis=-1)[:, ::-1] # (n_bins, 2)
+        v_transpose = v.swapaxes(-2, -1)
+        v_mn = _parallel_sort(v_transpose, order=order, axis=-2)
+        v_m, v_n = np.split(v_mn, 2, axis=1) # (n_bins, 1, 2), (n_bins, 1, 2)
+        v_m, v_n = v_m.squeeze(axis=1), v_n.squeeze(axis=1)
+        vUv_m, vUv_n = v_m[:, np.newaxis, :].conj() @ V_m @ v_m[:, :, np.newaxis], v_n[:, np.newaxis, :].conj() @ V_n @ v_n[:, :, np.newaxis]
+        denominator_m, denominator_n = np.sqrt(vUv_m.squeeze(axis=-1)), np.sqrt(vUv_n.squeeze(axis=-1))
+        v_m, v_n = v_m / denominator_m, v_n / denominator_n
+        w_m, w_n = P_m @ v_m[..., np.newaxis], P_n @ v_n[..., np.newaxis]
+        w_m, w_n = w_m.squeeze(axis=-1).conj(), w_n.squeeze(axis=-1).conj()
+
+        W[:, m, :] = np.where(condition_m, w_m, W[:, m, :])
+        W[:, n, :] = np.where(condition_n, w_n, W[:, n, :])
+
+        self.demix_filter = W
+
+        X = self.input
+        Y = self.separate(X, demix_filter=W)
+        
+        self.estimation = Y
     
     def update_once_ipa(self):
         raise ValueError("in progress...")
@@ -860,6 +914,28 @@ class SparseProxIVA(PDSBSSbase):
 
         raise NotImplementedError("coming soon")
 
+def _parallel_sort(x, order, axis=-2):
+    """
+    Args:
+        x: (*, n_elements, *)
+        order: (*, order_elements)
+        axis <int>
+    Returns:
+        x_sorted: (*, n_elements, *)
+    """
+    repeats = np.prod(x.shape[:axis])
+    n_elements = x.shape[axis]
+    tensor_shape = x.shape[axis+1:]
+    order_elements = order.shape[-1]
+
+    x_flatten = x.reshape(-1, *tensor_shape)
+    order_flatten = order.reshape(-1)
+    tmp = n_elements * np.arange(repeats) # 2049 * np.arange(2049)
+    shift = np.repeat(tmp, order_elements)
+    x_sorted = x_flatten[order_flatten + shift]
+    x_sorted = x_sorted.reshape(*x.shape[:axis], order_elements, *tensor_shape)
+
+    return x_sorted
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
@@ -1114,7 +1190,6 @@ def _test_prox_iva(method='ProxLaplaceIVA'):
     plt.ylabel('Loss')
     plt.savefig('data/IVA/{}/loss.png'.format(method), bbox_inches='tight')
     plt.close()
-
 
 def _test_conv():
     sr = 16000
