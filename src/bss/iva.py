@@ -410,13 +410,11 @@ class AuxLaplaceIVA(AuxIVAbase):
                 X, Y = self.input, self.estimation
                 self.demix_filter = self.compute_demix_filter(Y, X)
             
-                for callback in self.callbacks:
-                    callback(self)
-                
+            for callback in self.callbacks:
+                callback(self)
+            
+            if self.algorithm_spatial == 'ISS':
                 self.demix_filter = None
-            else:
-                for callback in self.callbacks:
-                    callback(self)
 
         for idx in range(iteration):
             if self.algorithm_spatial in ['pairwise', 'IP2']:
@@ -435,13 +433,11 @@ class AuxLaplaceIVA(AuxIVAbase):
                     X, Y = self.input, self.estimation
                     self.demix_filter = self.compute_demix_filter(Y, X)
                 
-                    for callback in self.callbacks:
-                        callback(self)
-                    
+                for callback in self.callbacks:
+                    callback(self)
+                
+                if self.algorithm_spatial == 'ISS':
                     self.demix_filter = None
-                else:
-                    for callback in self.callbacks:
-                        callback(self)
 
         reference_id = self.reference_id
 
@@ -592,13 +588,12 @@ class AuxGaussIVA(AuxIVAbase):
                 # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                 X, Y = self.input, self.estimation
                 self.demix_filter = self.compute_demix_filter(Y, X)
-
-                for callback in self.callbacks:
-                    callback(self)
+            
+            for callback in self.callbacks:
+                callback(self)
+            
+            if self.algorithm_spatial == 'ISS':
                 self.demix_filter = None
-            else:    
-                for callback in self.callbacks:
-                    callback(self)
 
         for idx in range(iteration):
             if self.algorithm_spatial in ['pairwise', 'IP2']:
@@ -616,14 +611,12 @@ class AuxGaussIVA(AuxIVAbase):
                     # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                     X, Y = self.input, self.estimation
                     self.demix_filter = self.compute_demix_filter(Y, X)
-
-                    for callback in self.callbacks:
-                        callback(self)
-                    
+                
+                for callback in self.callbacks:
+                    callback(self)
+                
+                if self.algorithm_spatial == 'ISS':
                     self.demix_filter = None
-                else:    
-                    for callback in self.callbacks:
-                        callback(self)
 
         reference_id = self.reference_id
 
@@ -662,8 +655,6 @@ class AuxGaussIVA(AuxIVAbase):
             self.update_once_ipa()
         else:
             raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
-        
-        self.estimation = Y
     
     def update_once_ip(self):
         n_sources, n_channels = self.n_sources, self.n_channels
