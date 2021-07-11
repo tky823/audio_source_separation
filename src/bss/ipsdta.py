@@ -243,7 +243,7 @@ class GaussIPSDTA(IPSDTAbase):
         else:
             self.activation = self.activation.copy()
         if not hasattr(self, 'fixed_point'):
-            self.fixed_point = 0.5 * np.random.rand(n_sources, n_bins) + 0.5j * np.random.rand(n_sources, n_bins)
+            self.fixed_point = np.ones((n_sources, n_bins), dtype=np.complex128) # 0.5 * np.random.rand(n_sources, n_bins) + 0.5j * np.random.rand(n_sources, n_bins)
         else:
             self.fixed_point = self.fixed_point.copy()
 
@@ -434,7 +434,6 @@ class GaussIPSDTA(IPSDTAbase):
         Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
         X = X.transpose(0, 2, 1) # (n_channels, n_frames, n_bins)
         Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
-        A = np.linalg.inv(W_Hermite) # (n_bins, n_channels, n_sources)
 
         U, V = self.basis, self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
         R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
@@ -465,41 +464,50 @@ class GaussIPSDTA(IPSDTAbase):
             G_low, G_high = _to_Hermite(G_low), _to_Hermite(G_high)
             inv_G_low, inv_G_high = np.linalg.inv(G_low + eps * np.eye(n_neighbors * n_channels)), np.linalg.inv(G_high + eps * np.eye((n_neighbors - n_paddings) * n_channels)) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
 
-            # Compute B
-            A_low, A_high = np.split(A, [n_bins - (n_neighbors - n_paddings)], axis=0) # (n_bins - (n_neighbors - n_paddings), n_channels, n_sources), (n_neighbors - n_paddings, n_channels, n_sources)
-            A_low, A_high = A_low.transpose(2, 0, 1), A_high.transpose(2, 0, 1) # (n_sources, n_bins - (n_neighbors - n_paddings), n_channels), (n_sources, n_neighbors - n_paddings, n_channels)
-            A_low, A_high = A_low.reshape(n_sources, n_blocks, n_neighbors, n_channels), A_high.reshape(n_sources, 1, n_neighbors - n_paddings, n_channels)
-
-            inv_G_low = inv_G_low.reshape(n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
-            inv_G_high = inv_G_high.reshape(n_sources, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
-            inv_G_low, inv_G_high = inv_G_low.transpose(0, 1, 2, 4, 3, 5), inv_G_high.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_neighbors, n_channels, n_channels), (n_sources, 1, n_neighbors - n_paddings, n_neighbors - n_paddings, n_channels, n_channels)
-
-            B_low = A_low[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_low @ A_low[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, n_blocks, n_neighbors, n_neighbors, 1, 1)
-            B_high = A_high[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_high @ A_high[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, n_blocks, n_neighbors - n_paddings, n_neighbors - n_paddings, 1, 1)
-            B_low, B_high = B_low.squeeze(axis=(-2, -1)), B_high.squeeze(axis=(-2, -1)) # (n_sources, n_blocks, n_neighbors, n_neighbors), (n_sources, n_blocks, n_neighbors - n_paddings, n_neighbors - n_paddings)
- 
-            # Update Lambda
             Lambda_low, Lambda_high = np.split(Lambda, [n_bins - (n_neighbors - n_paddings)], axis=1)
-            Lambda_low = Lambda_low.reshape(n_sources, n_blocks, n_neighbors, 1)
-            Lambda_high = Lambda_high.reshape(n_sources, 1, n_neighbors - n_paddings, 1)
-            Lambda_low, Lambda_high = B_low.swapaxes(2, 3) @ Lambda_low.conj(), B_high.swapaxes(2, 3) @ Lambda_high.conj()
-            Lambda_low[np.abs(Lambda_low) < eps], Lambda_high[np.abs(Lambda_high) < eps] = eps, eps
-            Lambda_low, Lambda_high = 1 / Lambda_low, 1 / Lambda_high
-            Lambda_low, Lambda_high = Lambda_low.squeeze(axis=3), Lambda_high.squeeze(axis=3) # (n_sources, n_blocks, n_neighbors), (n_sources, 1, n_neighbors - n_paddings)
 
-            GL_low, GL_high = inv_G_low * Lambda_low[:, :, np.newaxis, :, np.newaxis, np.newaxis], inv_G_high * Lambda_high[:, :, np.newaxis, :, np.newaxis, np.newaxis]
-            GL_low, GL_high = GL_low.transpose(0, 1, 2, 4, 3, 5), GL_high.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
-            GL_low, GL_high = GL_low.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), GL_high.reshape(n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
+            for source_idx in range(n_sources):
+                inv_G_n_low, inv_G_n_high = inv_G_low[source_idx], inv_G_high[source_idx] # (n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), (1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
 
-            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, n_bins - (n_neighbors - n_paddings)), Lambda_high.reshape(n_sources, n_neighbors - n_paddings)
+                # Compute B
+                A = np.linalg.inv(W_Hermite) # (n_bins, n_channels, n_sources)
+                A_n = A[..., source_idx]
+                A_n_low, A_n_high = np.split(A_n, [n_bins - (n_neighbors - n_paddings)], axis=0) # (n_bins - (n_neighbors - n_paddings), n_channels), (n_neighbors - n_paddings, n_channels)
+                A_n_low, A_n_high = A_n_low.reshape(n_blocks, n_neighbors, n_channels), A_n_high.reshape(1, n_neighbors - n_paddings, n_channels)
+
+                inv_G_n_low = inv_G_n_low.reshape(n_blocks, n_neighbors, n_channels, n_neighbors, n_channels) # (n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
+                inv_G_n_high = inv_G_n_high.reshape(1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels) # (n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
+                inv_G_n_low, inv_G_n_high = inv_G_n_low.transpose(0, 1, 3, 2, 4), inv_G_n_high.transpose(0, 1, 3, 2, 4) # (n_blocks, n_neighbors, n_neighbors, n_channels, n_channels), (1, n_neighbors - n_paddings, n_neighbors - n_paddings, n_channels, n_channels)
+
+                B_n_low = A_n_low[:, :, np.newaxis, np.newaxis, :].conj() @ inv_G_n_low @ A_n_low[:, np.newaxis, :, :, np.newaxis] # (n_blocks, n_neighbors, n_neighbors, 1, 1)
+                B_n_high = A_n_high[:, :, np.newaxis, np.newaxis, :].conj() @ inv_G_n_high @ A_n_high[:, np.newaxis, :, :, np.newaxis] # (n_blocks, n_neighbors - n_paddings, n_neighbors - n_paddings, 1, 1)
+                B_n_low, B_n_high = B_n_low.squeeze(axis=(3, 4)), B_n_high.squeeze(axis=(3, 4)) # (n_blocks, n_neighbors, n_neighbors), (n_blocks, n_neighbors - n_paddings, n_neighbors - n_paddings)
+    
+                # Update Lambda
+                Lambda_n_low, Lambda_n_high = Lambda_low[source_idx], Lambda_high[source_idx]
+                Lambda_n_low = Lambda_n_low.reshape(n_blocks, n_neighbors, 1)
+                Lambda_n_high = Lambda_n_high.reshape(1, n_neighbors - n_paddings, 1)
+
+                Lambda_n_low, Lambda_n_high = B_n_low.swapaxes(1, 2) @ Lambda_n_low.conj(), B_n_high.swapaxes(1, 2) @ Lambda_n_high.conj()
+                Lambda_n_low[np.abs(Lambda_n_low) < eps], Lambda_n_high[np.abs(Lambda_n_high) < eps] = eps, eps
+                Lambda_n_low, Lambda_n_high = 1 / Lambda_n_low, 1 / Lambda_n_high
+                Lambda_n_low, Lambda_n_high = Lambda_n_low.squeeze(axis=2), Lambda_n_high.squeeze(axis=2) # (n_blocks, n_neighbors), (1, n_neighbors - n_paddings)
+
+                GL_n_low, GL_n_high = inv_G_n_low * Lambda_n_low[:, np.newaxis, :, np.newaxis, np.newaxis], inv_G_n_high * Lambda_n_high[:, np.newaxis, :, np.newaxis, np.newaxis]
+                GL_n_low, GL_n_high = GL_n_low.transpose(0, 1, 3, 2, 4), GL_n_high.transpose(0, 1, 3, 2, 4) # (n_blocks, n_neighbors, n_channels, n_neighbors, n_channels), (1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
+                GL_n_low, GL_n_high = GL_n_low.reshape(n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), GL_n_high.reshape(1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
+
+                Lambda_n_low, Lambda_n_high = Lambda_n_low.reshape(n_bins - (n_neighbors - n_paddings)), Lambda_n_high.reshape(n_neighbors - n_paddings)
+                Lambda_low[source_idx], Lambda_high[source_idx] = Lambda_n_low, Lambda_n_high
+
+                A_n_low, A_n_high = A_n_low.reshape(n_blocks, n_neighbors * n_channels), A_n_high.reshape(1, (n_neighbors - n_paddings) * n_channels)
+                W_n_low = np.sum(GL_n_low * A_n_low[:, np.newaxis, :], axis=2) # (n_blocks, n_neighbors * n_channels)
+                W_n_high = np.sum(GL_n_high * A_n_high[:, np.newaxis, :], axis=2) # (1, (n_neighbors - n_paddings) * n_channels)
+                W_n_low, W_n_high = W_n_low.reshape(n_bins - (n_neighbors - n_paddings), n_channels), W_n_high.reshape(n_neighbors - n_paddings, n_channels)
+                W_n = np.concatenate([W_n_low, W_n_high], axis=0) # (n_bins, n_channels)
+                W_Hermite[:, source_idx, :] = W_n.conj()
+                
             Lambda = np.concatenate([Lambda_low, Lambda_high], axis=1)
-
-            A_low, A_high = A_low.reshape(n_sources, n_blocks, n_neighbors * n_channels), A_high.reshape(n_sources, 1, (n_neighbors - n_paddings) * n_channels)
-            W_Hermite_low = np.sum(GL_low * A_low[:, :, np.newaxis, :], axis=3) # (n_sources, n_blocks, n_neighbors * n_channels)
-            W_Hermite_high = np.sum(GL_high * A_high[:, :, np.newaxis, :], axis=3) # (n_sources, 1, (n_neighbors - n_paddings) * n_channels)
-            W_Hermite_low, W_Hermite_high = W_Hermite_low.reshape(n_sources, n_bins - (n_neighbors - n_paddings), n_channels), W_Hermite_high.reshape(n_sources, n_neighbors - n_paddings, n_channels)
-            W_Hermite = np.concatenate([W_Hermite_low, W_Hermite_high], axis=1) # (n_sources, n_bins, n_channels)
-            W_Hermite = W_Hermite.transpose(1, 0, 2).conj()
         else:
             X = X.reshape(n_channels, n_frames, n_blocks, n_neighbors)
             X = X.transpose(1, 2, 3, 0).reshape(n_frames, n_blocks, n_neighbors * n_channels)
@@ -517,33 +525,39 @@ class GaussIPSDTA(IPSDTAbase):
             G = _to_Hermite(G)
             inv_G = np.linalg.inv(G + eps * np.eye(n_neighbors * n_channels)) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
 
-            # Compute B
-            A = A.transpose(2, 0, 1) # (n_sources, n_bins, n_channels)
-            A = A.reshape(n_sources, n_blocks, n_neighbors, n_channels)
+            for source_idx in range(n_sources):
+                inv_G_n = inv_G[source_idx] # (n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
 
-            inv_G = inv_G.reshape(n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
-            inv_G = inv_G.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_neighbors, n_channels, n_channels)
+                # Compute B
+                A = np.linalg.inv(W_Hermite) # (n_bins, n_channels, n_sources)
+                A_n = A[..., source_idx]
+                A_n = A_n.reshape(n_blocks, n_neighbors, n_channels)
 
-            B = A[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G @ A[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, n_blocks, n_neighbors, n_neighbors, 1, 1)
-            B = B.squeeze(axis=(-2, -1)) # (n_sources, n_blocks, n_neighbors, n_neighbors)
- 
-            # Update Lambda
-            Lambda = Lambda.reshape(n_sources, n_blocks, n_neighbors, 1)
-            Lambda = B.swapaxes(2, 3) @ Lambda.conj()
-            Lambda[np.abs(Lambda) < eps] = eps
-            Lambda = 1 / Lambda
-            Lambda = Lambda.squeeze(axis=3) # (n_sources, n_blocks, n_neighbors)
+                inv_G_n = inv_G_n.reshape(n_blocks, n_neighbors, n_channels, n_neighbors, n_channels) # (n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
+                inv_G_n = inv_G_n.transpose(0, 1, 3, 2, 4) # (n_blocks, n_neighbors, n_neighbors, n_channels, n_channels)
 
-            GL = inv_G * Lambda[:, :, np.newaxis, :, np.newaxis, np.newaxis]
-            GL = GL.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
-            GL = GL.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
+                B_n = A_n[:, :, np.newaxis, np.newaxis, :].conj() @ inv_G_n @ A_n[:, np.newaxis, :, :, np.newaxis] # (n_blocks, n_neighbors, n_neighbors, 1, 1)
+                B_n = B_n.squeeze(axis=(3, 4)) # (n_blocks, n_neighbors, n_neighbors)
+    
+                # Update Lambda
+                Lambda_n = Lambda[source_idx]
+                Lambda_n = Lambda_n.reshape(n_blocks, n_neighbors, 1)
+                Lambda_n = B_n.swapaxes(1, 2) @ Lambda_n.conj()
+                Lambda_n[np.abs(Lambda_n) < eps] = eps
+                Lambda_n = 1 / Lambda_n
+                Lambda_n = Lambda_n.squeeze(axis=2) # (n_blocks, n_neighbors)
 
-            Lambda = Lambda.reshape(n_sources, n_bins)
+                GL_n = inv_G_n * Lambda_n[:, np.newaxis, :, np.newaxis, np.newaxis]
+                GL_n = GL_n.transpose(0, 1, 3, 2, 4) # (n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
+                GL_n = GL_n.reshape(n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
 
-            A = A.reshape(n_sources, n_blocks, n_neighbors * n_channels)
-            W_Hermite = np.sum(GL * A[:, :, np.newaxis, :], axis=3) # (n_sources, n_blocks, n_neighbors * n_channels)
-            W_Hermite = W_Hermite.reshape(n_sources, n_bins, n_channels) # (n_sources, n_bins, n_channels)
-            W_Hermite = W_Hermite.transpose(1, 0, 2).conj()
+                Lambda_n = Lambda_n.reshape(n_bins)
+                Lambda[source_idx] = Lambda_n
+
+                A_n = A_n.reshape(n_blocks, n_neighbors * n_channels)
+                W_n = np.sum(GL_n * A_n[:, np.newaxis, :], axis=2) # (n_blocks, n_neighbors * n_channels)
+                W_n = W_n.reshape(n_bins, n_channels)
+                W_Hermite[:, source_idx, :] = W_n.conj()
 
         self.demix_filter = W_Hermite
         self.fixed_point = Lambda
