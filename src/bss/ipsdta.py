@@ -486,12 +486,13 @@ class GaussIPSDTA(IPSDTAbase):
             Lambda_low[np.abs(Lambda_low) < eps], Lambda_high[np.abs(Lambda_high) < eps] = eps, eps
             Lambda_low, Lambda_high = 1 / Lambda_low, 1 / Lambda_high
             Lambda_low, Lambda_high = Lambda_low.squeeze(axis=3), Lambda_high.squeeze(axis=3) # (n_sources, n_blocks, n_neighbors), (n_sources, 1, n_neighbors - n_paddings)
-            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, n_bins - (n_neighbors - n_paddings)), Lambda_high.reshape(n_sources, n_neighbors - n_paddings)
-            Lambda = np.concatenate([Lambda_low, Lambda_high], axis=1)
 
             GL_low, GL_high = inv_G_low * Lambda_low[:, :, np.newaxis, :, np.newaxis, np.newaxis], inv_G_high * Lambda_high[:, :, np.newaxis, :, np.newaxis, np.newaxis]
             GL_low, GL_high = GL_low.transpose(0, 1, 2, 4, 3, 5), GL_high.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
             GL_low, GL_high = GL_low.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), GL_high.reshape(n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
+
+            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, n_bins - (n_neighbors - n_paddings)), Lambda_high.reshape(n_sources, n_neighbors - n_paddings)
+            Lambda = np.concatenate([Lambda_low, Lambda_high], axis=1)
 
             A_low, A_high = A_low.reshape(n_sources, n_blocks, n_neighbors * n_channels), A_high.reshape(n_sources, 1, (n_neighbors - n_paddings) * n_channels)
             W_Hermite_low = np.sum(GL_low * A_low[:, :, np.newaxis, :], axis=3) # (n_sources, n_blocks, n_neighbors * n_channels)
@@ -536,6 +537,8 @@ class GaussIPSDTA(IPSDTAbase):
             GL = inv_G * Lambda[:, :, np.newaxis, :, np.newaxis, np.newaxis]
             GL = GL.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
             GL = GL.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
+
+            Lambda = Lambda.reshape(n_sources, n_bins)
 
             A = A.reshape(n_sources, n_blocks, n_neighbors * n_channels)
             W_Hermite = np.sum(GL * A[:, :, np.newaxis, :], axis=3) # (n_sources, n_blocks, n_neighbors * n_channels)
