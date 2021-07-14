@@ -232,6 +232,7 @@ class GaussIPSDTA(IPSDTAbase):
         self.n_paddings = n_paddings
 
         if not hasattr(self, 'basis'):
+            # TODO: Initialization
             U = np.eye(n_neighbors, dtype=np.complex128)
             if n_paddings > 0:
                 U = np.tile(U, reps=(n_sources, n_basis, n_blocks + 1, 1, 1))
