@@ -464,7 +464,8 @@ class GaussIPSDTA(IPSDTAbase):
             G_low, G_high = G_low.transpose(0, 1, 2, 4, 3, 5), G_high.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
             G_low, G_high = G_low.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), G_high.reshape(n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
             G_low, G_high = _to_Hermite(G_low), _to_Hermite(G_high)
-            inv_G_low, inv_G_high = np.linalg.inv(G_low + eps * np.eye(n_neighbors * n_channels)), np.linalg.inv(G_high + eps * np.eye((n_neighbors - n_paddings) * n_channels)) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
+            
+            inv_G_low, inv_G_high = np.linalg.inv(G_low), np.linalg.inv(G_high) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
             inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low.transpose(0, 1, 3, 2).conj(), inv_G_high.transpose(0, 1, 3, 2).conj() # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
             inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.reshape(n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels), inv_G_high_Hermite.reshape(n_sources, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
             inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.transpose(0, 1, 2, 4, 3, 5), inv_G_high_Hermite.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_neighbors, n_channels, n_channels), (n_sources, 1, n_neighbors - n_paddings, n_neighbors - n_paddings, n_channels, n_channels)
@@ -514,6 +515,7 @@ class GaussIPSDTA(IPSDTAbase):
             G = G.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
             G = G.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
             G = _to_Hermite(G)
+
             inv_G = np.linalg.inv(G) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
             inv_G_Hermite = inv_G.transpose(0, 1, 3, 2).conj() # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
             inv_G_Hermite = inv_G_Hermite.reshape(n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
@@ -547,7 +549,7 @@ class GaussIPSDTA(IPSDTAbase):
 
         self.demix_filter = W_Hermite
         self.fixed_point = Lambda
-
+    
     def compute_negative_loglikelihood(self):
         if self.author.lower() == 'ikeshita':
             loss = self.compute_negative_loglikelihood_ikeshita()
