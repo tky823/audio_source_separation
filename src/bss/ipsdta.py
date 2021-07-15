@@ -441,7 +441,7 @@ class GaussIPSDTA(IPSDTAbase):
         X = X.transpose(0, 2, 1) # (n_channels, n_frames, n_bins)
         Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
 
-        U, V = self.basis.transpose(0, 2, 3, 4, 1), self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
+        U, V = self.basis.transpose(0, 4, 1, 2, 3), self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
         R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
         R = _to_Hermite(R, axis1=3, axis2=4)
 
@@ -572,7 +572,7 @@ class GaussIPSDTA(IPSDTAbase):
         X, W_Hermite = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
         
-        U, V = self.basis.transpose(0, 2, 3, 4, 1), self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
+        U, V = self.basis.transpose(0, 4, 1, 2, 3), self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
         R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
         Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
 
