@@ -17,7 +17,7 @@ class IPSDTAbase:
     """
     Independent Positive Semi-Definite Tensor Analysis
     """
-    def __init__(self, n_basis=10, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, recordable_loss=True, eps=EPS):
+    def __init__(self, n_basis=10, normalize=True, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, recordable_loss=True, eps=EPS):
         if callbacks is not None:
             if callable(callbacks):
                 callbacks = [callbacks]
@@ -28,6 +28,7 @@ class IPSDTAbase:
         self.eps = eps
         
         self.n_basis = n_basis
+        self.normalize = normalize
 
         assert algorithm_spatial in __algorithms_spatial__, "Choose from {} as `algorithm_spatial`.".format(__algorithms_spatial__)
         self.algorithm_spatial = algorithm_spatial
@@ -145,7 +146,7 @@ class GaussIPSDTA(IPSDTAbase):
         Reference: "Independent Positive Semidefinite Tensor Analysisin Blind Source Separation"
         See https://ieeexplore.ieee.org/document/8553546
     """
-    def __init__(self, n_basis=10, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
+    def __init__(self, n_basis=10, normalize=True, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
         """
         Args:
             n_basis <int>: Number of basis matrices
@@ -154,7 +155,7 @@ class GaussIPSDTA(IPSDTAbase):
             reference_id <int>:
             author <str>: 'Ikeshita'
         """
-        super().__init__(n_basis=n_basis, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
         self.author = author
         
@@ -284,6 +285,34 @@ class GaussIPSDTA(IPSDTAbase):
             self.update_source_model_em()
         else:
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
+        
+        if self.normalize:
+            n_basis = self.n_basis
+            n_sources = self.n_sources
+            n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
+            n_paddings = self.n_paddings
+
+            U, V = self.basis.transpose(0, 4, 1, 2, 3), self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
+
+            if n_paddings > 0:
+                U_low, U_high = np.split(U, [n_blocks], axis=2) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors, n_neighbors)
+                U_high = U_high[..., -n_paddings, -n_paddings] # (n_sources, n_basis, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+                trace_low, trace_high = np.trace(U_low, axis1=3, axis2=4), np.trace(U_high, axis1=3, axis2=4)
+                trace = np.concatenate([trace_low, trace_high], axis=2) # (n_sources, n_basis, n_blocks + 1)
+                trace = trace.sum(axis=3) # (n_sources, n_basis)
+                U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, np.newaxis], U_high / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
+                U = np.eye(n_neighbors, dtype=np.complex128)
+                U = np.tile(U, reps=(n_sources, n_basis, n_blocks + 1, 1, 1)) # (n_sources, n_basis, n_blocks + 1, n_neighbors, n_neighbors)
+                U[:, :, :n_blocks, :, :] = U_low
+                U[:, :, :n_blocks, :-n_paddings, :-n_paddings] = U_high
+                V = V * trace[:, :, np.newaxis]
+            else:
+                trace = np.trace(U, axis1=3, axis2=4)
+                trace = trace.sum(axis=3) # (n_sources, n_basis)
+                U = U / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
+                V = V * trace[:, :, np.newaxis]
+    
+            self.basis, self.activation = U.transpose(0, 2, 3, 4, 1), V
     
     def update_spatial_model(self):
         algorithm_spatial = self.algorithm_spatial
@@ -296,7 +325,6 @@ class GaussIPSDTA(IPSDTAbase):
     def update_source_model_em(self):
         self.update_basis_em()
         self.update_activation_em()
-        # TODO: normalize
     
     def update_basis_em(self):
         n_frames = self.n_frames
