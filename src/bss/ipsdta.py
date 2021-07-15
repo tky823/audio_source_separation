@@ -116,7 +116,7 @@ class IPSDTAbase:
     def __repr__(self):
         s = "IPSDTA("
         s += "n_basis={n_basis}"
-        s += "normalize={normalize}"
+        s += ", normalize={normalize}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -271,7 +271,7 @@ class GaussIPSDTA(IPSDTAbase):
     def __repr__(self):
         s = "Gauss-IPSDTA("
         s += "n_basis={n_basis}"
-        s += "normalize={normalize}"
+        s += ", normalize={normalize}"
         if self.author.lower() == 'ikeshita':
             s += ", n_blocks={n_blocks}"
         s += ")"
