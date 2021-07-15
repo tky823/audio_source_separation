@@ -231,7 +231,7 @@ class GaussIPSDTA(IPSDTAbase):
         for key in kwargs.keys():
             setattr(self, key, kwargs[key])
         
-        if self.author.lower() in ['ikeshita']:
+        if self.author.lower() in __authors_ipsdta__:
             self._reset_block(**kwargs)
     
     def _reset_block(self, **kwargs):
