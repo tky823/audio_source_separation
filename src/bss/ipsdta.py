@@ -614,15 +614,15 @@ class GaussIPSDTA(IPSDTAbase):
         self.fixed_point = Lambda
     
     def compute_negative_loglikelihood(self):
-        if self.author.lower() == 'ikeshita':
-            loss = self.compute_negative_loglikelihood_ikeshita()
+        if self.author.lower() in __authors_ipsdta__:
+            loss = self.compute_negative_loglikelihood_block()
         else:
             raise ValueError("Not support {}'s IPSDTA.".format(self.author))
 
         return loss
 
-    def compute_negative_loglikelihood_ikeshita(self):
-        n_bins, n_frames = self.n_bins, self.n_frames
+    def compute_negative_loglikelihood_block(self):
+        n_frames = self.n_frames
         n_sources = self.n_sources
         n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
         n_paddings = self.n_paddings
