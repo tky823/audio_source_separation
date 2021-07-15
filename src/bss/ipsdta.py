@@ -4,6 +4,11 @@ from algorithm.projection_back import projection_back
 
 EPS = 1e-12
 
+__algorithms_spatial__ = [
+    'fixed-point',
+    'VCD'
+]
+
 __kwargs_ikeshita_ipsdta__ = {
     'n_blocks': 1024
 }
@@ -12,7 +17,7 @@ class IPSDTAbase:
     """
     Independent Positive Semi-Definite Tensor Analysis
     """
-    def __init__(self, n_basis=10, callbacks=None, reference_id=0, recordable_loss=True, eps=EPS):
+    def __init__(self, n_basis=10, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, recordable_loss=True, eps=EPS):
         if callbacks is not None:
             if callable(callbacks):
                 callbacks = [callbacks]
@@ -23,6 +28,9 @@ class IPSDTAbase:
         self.eps = eps
         
         self.n_basis = n_basis
+
+        assert algorithm_spatial in __algorithms_spatial__, "Choose from {} as `algorithm_spatial`.".format(__algorithms_spatial__)
+        self.algorithm_spatial = algorithm_spatial
 
         self.input = None
         self.recordable_loss = recordable_loss
@@ -137,11 +145,16 @@ class GaussIPSDTA(IPSDTAbase):
         Reference: "Independent Positive Semidefinite Tensor Analysisin Blind Source Separation"
         See https://ieeexplore.ieee.org/document/8553546
     """
-    def __init__(self, n_basis=10, callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
+    def __init__(self, n_basis=10, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
         """
         Args:
+            n_basis <int>: Number of basis matrices
+            algorithm_spatial: 'fixed-point': fixed-point iteration, 'VCD': vector-wise coordinate descent
+            callbacks <callable> or <list<callable>>:
+            reference_id <int>:
+            author <str>: 'Ikeshita'
         """
-        super().__init__(n_basis=n_basis, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
         self.author = author
         
@@ -202,10 +215,10 @@ class GaussIPSDTA(IPSDTAbase):
         for key in kwargs.keys():
             setattr(self, key, kwargs[key])
         
-        if self.author.lower() == 'ikeshita':
-            self._reset_ikeshita(**kwargs)
+        if self.author.lower() in ['ikeshita']:
+            self._reset_block(**kwargs)
     
-    def _reset_ikeshita(self, **kwargs):
+    def _reset_block(self, **kwargs):
         n_basis = self.n_basis
         n_blocks = self.n_blocks
 
@@ -273,7 +286,9 @@ class GaussIPSDTA(IPSDTAbase):
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
     
     def update_spatial_model(self):
-        if self.author.lower() == 'ikeshita':
+        algorithm_spatial = self.algorithm_spatial
+
+        if algorithm_spatial == 'fixed-point':
             self.update_spatial_model_fixed_point()
         else:
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
