@@ -320,7 +320,7 @@ class GaussIPSDTA(IPSDTAbase):
                 U = np.eye(n_neighbors, dtype=np.complex128)
                 U = np.tile(U, reps=(n_sources, n_basis, n_blocks + 1, 1, 1)) # (n_sources, n_basis, n_blocks + 1, n_neighbors, n_neighbors)
                 U[:, :, :n_blocks, :, :] = U_low
-                U[:, :, :n_blocks, :-n_paddings, :-n_paddings] = U_high
+                U[:, :, n_blocks:, :-n_paddings, :-n_paddings] = U_high
                 V = V * trace[:, :, np.newaxis]
             else:
                 trace = np.trace(U, axis1=3, axis2=4)
