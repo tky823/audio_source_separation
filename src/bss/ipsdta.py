@@ -277,11 +277,13 @@ class GaussIPSDTA(IPSDTAbase):
             self.activation = np.random.rand(n_sources, n_basis, n_frames)
         else:
             self.activation = self.activation.copy()
-        if not hasattr(self, 'fixed_point'):
-            self.fixed_point = np.ones((n_sources, n_bins), dtype=np.complex128)
-        else:
-            self.fixed_point = self.fixed_point.copy()
-
+        
+        if self.algorithm_spatial == 'fixed-point':
+            if not hasattr(self, 'fixed_point'):
+                self.fixed_point = np.ones((n_sources, n_bins), dtype=np.complex128)
+            else:
+                self.fixed_point = self.fixed_point.copy()
+    
     def __repr__(self):
         s = "Gauss-IPSDTA("
         s += "n_basis={n_basis}"
