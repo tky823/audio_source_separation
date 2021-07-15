@@ -164,7 +164,7 @@ class GaussIPSDTA(IPSDTAbase):
             reference_id <int>:
             author <str>: 'Ikeshita'
         """
-        super().__init__(n_basis=n_basis, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps, **kwargs)
+        super().__init__(n_basis=n_basis, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
         self.author = author
 
