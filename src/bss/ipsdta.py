@@ -9,7 +9,15 @@ __algorithms_spatial__ = [
     'VCD'
 ]
 
+__authors_ipsdta__ = [
+    'ikeshita', 'kondo'
+]
+
 __kwargs_ikeshita_ipsdta__ = {
+    'n_blocks': 1024
+}
+
+__kwargs_kondo_ipsdta__ = {
     'n_blocks': 1024
 }
 
@@ -159,12 +167,18 @@ class GaussIPSDTA(IPSDTAbase):
         super().__init__(n_basis=n_basis, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
         self.author = author
-        
-        if author.lower() == 'ikeshita':
-            if set(kwargs) - set(__kwargs_ikeshita_ipsdta__) != set():
-                raise ValueError("Invalid keywords.")
-            for key in __kwargs_ikeshita_ipsdta__.keys():
-                setattr(self, key, __kwargs_ikeshita_ipsdta__[key])
+
+        if author.lower() in __authors_ipsdta__:
+            if author.lower() == 'ikeshita':
+                if set(kwargs) - set(__kwargs_ikeshita_ipsdta__) != set():
+                    raise ValueError("Invalid keywords.")
+                for key in __kwargs_ikeshita_ipsdta__.keys():
+                    setattr(self, key, __kwargs_ikeshita_ipsdta__[key])
+            elif author.lower() == 'kondo':
+                if set(kwargs) - set(__kwargs_kondo_ipsdta__) != set():
+                    raise ValueError("Invalid keywords.")
+                for key in __kwargs_kondo_ipsdta__.keys():
+                    setattr(self, key, __kwargs_kondo_ipsdta__[key])
             for key in kwargs.keys():
                 setattr(self, key, kwargs[key])
         else:
