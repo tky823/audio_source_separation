@@ -116,6 +116,7 @@ class IPSDTAbase:
     def __repr__(self):
         s = "IPSDTA("
         s += "n_basis={n_basis}"
+        s += "normalize={normalize}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -270,6 +271,7 @@ class GaussIPSDTA(IPSDTAbase):
     def __repr__(self):
         s = "Gauss-IPSDTA("
         s += "n_basis={n_basis}"
+        s += "normalize={normalize}"
         if self.author.lower() == 'ikeshita':
             s += ", n_blocks={n_blocks}"
         s += ")"
@@ -296,7 +298,7 @@ class GaussIPSDTA(IPSDTAbase):
 
             if n_paddings > 0:
                 U_low, U_high = np.split(U, [n_blocks], axis=2) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors, n_neighbors)
-                U_high = U_high[..., -n_paddings, -n_paddings] # (n_sources, n_basis, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+                U_high = U_high[..., :-n_paddings, :-n_paddings] # (n_sources, n_basis, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
                 trace_low, trace_high = np.trace(U_low, axis1=3, axis2=4), np.trace(U_high, axis1=3, axis2=4)
                 trace = np.concatenate([trace_low, trace_high], axis=2) # (n_sources, n_basis, n_blocks + 1)
                 trace = trace.sum(axis=3) # (n_sources, n_basis)
