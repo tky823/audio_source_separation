@@ -301,7 +301,7 @@ class GaussIPSDTA(IPSDTAbase):
                 U_high = U_high[..., :-n_paddings, :-n_paddings] # (n_sources, n_basis, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
                 trace_low, trace_high = np.trace(U_low, axis1=3, axis2=4), np.trace(U_high, axis1=3, axis2=4)
                 trace = np.concatenate([trace_low, trace_high], axis=2) # (n_sources, n_basis, n_blocks + 1)
-                trace = trace.sum(axis=3) # (n_sources, n_basis)
+                trace = trace.sum(axis=2) # (n_sources, n_basis)
                 U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, np.newaxis], U_high / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
                 U = np.eye(n_neighbors, dtype=np.complex128)
                 U = np.tile(U, reps=(n_sources, n_basis, n_blocks + 1, 1, 1)) # (n_sources, n_basis, n_blocks + 1, n_neighbors, n_neighbors)
@@ -310,7 +310,7 @@ class GaussIPSDTA(IPSDTAbase):
                 V = V * trace[:, :, np.newaxis]
             else:
                 trace = np.trace(U, axis1=3, axis2=4)
-                trace = trace.sum(axis=3) # (n_sources, n_basis)
+                trace = trace.sum(axis=2) # (n_sources, n_basis)
                 U = U / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
                 V = V * trace[:, :, np.newaxis]
     
