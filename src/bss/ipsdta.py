@@ -164,7 +164,7 @@ class GaussIPSDTA(IPSDTAbase):
             reference_id <int>:
             author <str>: 'Ikeshita'
         """
-        super().__init__(n_basis=n_basis, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps, **kwargs)
 
         self.author = author
 
@@ -283,7 +283,7 @@ class GaussIPSDTA(IPSDTAbase):
                 self.fixed_point = np.ones((n_sources, n_bins), dtype=np.complex128)
             else:
                 self.fixed_point = self.fixed_point.copy()
-    
+
     def __repr__(self):
         s = "Gauss-IPSDTA("
         s += "n_basis={n_basis}"
