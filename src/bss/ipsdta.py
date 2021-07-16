@@ -256,7 +256,7 @@ class GaussIPSDTA(IPSDTAbase):
         self.estimation = self.separate(X, demix_filter=W_Hermite)
 
         n_neighbors = n_bins  // n_blocks
-        n_remains = n_bins % n_neighbors
+        n_remains = n_bins % n_blocks
 
         self.n_blocks, self.n_neighbors = n_blocks, n_neighbors
         self.n_remains = n_remains
@@ -264,10 +264,10 @@ class GaussIPSDTA(IPSDTAbase):
         if not hasattr(self, 'basis'):
             if n_remains > 0:
                 eye_low = np.eye(n_neighbors, dtype=np.complex128)
-                eye_high = np.eye(n_neighbors + n_remains, dtype=np.complex128)
-                eye_low = np.tile(eye_low, reps=(n_sources, n_basis, n_blocks - 1, 1, 1))
-                eye_high = np.tile(eye_high, reps=(n_sources, n_basis, 1, 1, 1))
-                U_low, U_high = np.random.rand(n_sources, n_basis, n_blocks - 1, n_neighbors), np.random.rand(n_sources, n_basis, 1, n_neighbors + n_remains)
+                eye_high = np.eye(n_neighbors + 1, dtype=np.complex128)
+                eye_low = np.tile(eye_low, reps=(n_sources, n_basis, n_blocks - n_remains, 1, 1))
+                eye_high = np.tile(eye_high, reps=(n_sources, n_basis, n_remains, 1, 1))
+                U_low, U_high = np.random.rand(n_sources, n_basis, n_blocks - n_remains, n_neighbors), np.random.rand(n_sources, n_basis, n_remains, n_neighbors + 1)
                 U_low, U_high = U_low[:, :, :, :, np.newaxis] * eye_low, U_high[:, :, :, :, np.newaxis] * eye_high
                 U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
             else:
