@@ -438,31 +438,31 @@ class GaussIPSDTA(IPSDTAbase):
         
         if n_remains > 0:
             U_low, U_high = U
-            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors + n_remains, n_neighbors + n_remains)
-            Y_low, Y_high = np.split(Y, [(n_blocks - 1) * n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - 1) * n_neighbors), (n_sources, n_frames, n_neighbors + n_remains)
-            Y_low = Y_low.reshape(n_sources, n_frames, n_blocks - 1, n_neighbors, 1)
-            Y_high = Y_high.reshape(n_sources, n_frames, 1, n_neighbors + n_remains, 1)
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
+            Y_low, Y_high = np.split(Y, [(n_blocks - n_remains) * n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
+            Y_low = Y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
+            Y_high = Y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1, 1)
             
-            R_basis_low = U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors)
-            R_basis_high = U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
-            R_low, R_high = np.sum(R_basis_low, axis=1), np.sum(R_basis_high, axis=1) # (n_sources, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            R_basis_low = U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_basis_high = U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            R_low, R_high = np.sum(R_basis_low, axis=1), np.sum(R_basis_high, axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low, R_high = _to_Hermite(R_low, axis1=3, axis2=4), _to_Hermite(R_high, axis1=3, axis2=4)
 
-            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + n_remains)) # (n_sources, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
             RR_low = R_basis_low @ inv_R_low[:, np.newaxis, :, :, :, :]
             RR_high = R_basis_high @ inv_R_high[:, np.newaxis, :, :, :, :]
-            y_hat_low = RR_low @ Y_low[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, 1)
-            y_hat_high = RR_high @ Y_high[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, 1)
+            y_hat_low = RR_low @ Y_low[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, 1)
+            y_hat_high = RR_high @ Y_high[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, 1)
 
-            R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors)
-            R_hat_high = R_basis_high @ (np.eye(n_neighbors + n_remains) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_hat_high = R_basis_high @ (np.eye(n_neighbors + 1) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_hat_low, R_hat_high = _to_Hermite(R_hat_low), _to_Hermite(R_hat_high)
 
             Phi_low = y_hat_low * y_hat_low.swapaxes(-2, -1).conj() + R_hat_low
             Phi_high = y_hat_high * y_hat_high.swapaxes(-2, -1).conj() + R_hat_high
-            Phi_low, Phi_high = _to_Hermite(Phi_low), _to_Hermite(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            Phi_low, Phi_high = _to_Hermite(Phi_low), _to_Hermite(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             
-            inv_U_low, inv_U_high = np.linalg.inv(U_low + eps * np.eye(n_neighbors)), np.linalg.inv(U_high + eps * np.eye(n_neighbors + n_remains)) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            inv_U_low, inv_U_high = np.linalg.inv(U_low + eps * np.eye(n_neighbors)), np.linalg.inv(U_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
             UPhi_low, UPhi_high = inv_U_low[:, :, np.newaxis, :, :, :] @ Phi_low, inv_U_high[:, :, np.newaxis, :, :, :] @ Phi_high
             trace_low = np.trace(UPhi_low, axis1=-2, axis2=-1).real
             trace_high = np.trace(UPhi_high, axis1=-2, axis2=-1).real
@@ -516,62 +516,62 @@ class GaussIPSDTA(IPSDTAbase):
 
         if n_remains > 0:
             U_low, U_high = U
-            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors + n_remains, n_neighbors + n_remains)
-            R_low = np.sum(U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks - 1, n_neighbors, n_neighbors)
-            R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
+            R_low = np.sum(U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low, R_high = _to_Hermite(R_low, axis1=3, axis2=4), _to_Hermite(R_high, axis1=3, axis2=4)
 
-            X_low, X_high = np.split(X, [(n_blocks - 1) * n_neighbors], axis=2) # (n_channels, n_frames, (n_blocks - 1) * n_neighbors), (n_channels, n_frames, n_neighbors + n_remains)
-            X_low, X_high = X_low.reshape(n_channels, n_frames, n_blocks - 1, n_neighbors), X_high.reshape(n_channels, n_frames, 1, n_neighbors + n_remains)
-            X_low, X_high = X_low.transpose(1, 2, 3, 0).reshape(n_frames, n_blocks - 1, n_neighbors * n_channels), X_high.transpose(1, 2, 3, 0).reshape(n_frames, 1, (n_neighbors + n_remains) * n_channels)
+            X_low, X_high = np.split(X, [(n_blocks - n_remains) * n_neighbors], axis=2) # (n_channels, n_frames, (n_blocks - n_remains) * n_neighbors), (n_channels, n_frames, n_remains * (n_neighbors + 1))
+            X_low, X_high = X_low.reshape(n_channels, n_frames, n_blocks - n_remains, n_neighbors), X_high.reshape(n_channels, n_frames, n_remains, n_neighbors + 1)
+            X_low, X_high = X_low.transpose(1, 2, 3, 0).reshape(n_frames, n_blocks - n_remains, n_neighbors * n_channels), X_high.transpose(1, 2, 3, 0).reshape(n_frames, n_remains, (n_neighbors + 1) * n_channels)
 
             # Compute G
-            XX_low = X_low[:, :, :, np.newaxis] * X_low[:, :, np.newaxis, :].conj() # (n_frames, n_blocks - 1, n_neighbors * n_channels, n_neighbors * n_channels)
-            XX_high = X_high[:, :, :, np.newaxis] * X_high[:, :, np.newaxis, :].conj() # (n_frames, 1, (n_neighbors + n_remains) * n_channels, (n_neighbors + n_remains) * n_channels)
-            XX_low = XX_low.reshape(n_frames, n_blocks - 1, n_neighbors, n_channels, n_neighbors, n_channels)
-            XX_high = XX_high.reshape(n_frames, 1, n_neighbors + n_remains, n_channels, n_neighbors + n_remains, n_channels)
-            XX_low, XX_high = XX_low.transpose(0, 1, 2, 4, 3, 5), XX_high.transpose(0, 1, 2, 4, 3, 5) # (n_frames, n_blocks - 1, n_neighbors, n_neighbors, n_channels, n_channels), (n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains, n_channels, n_channels)
+            XX_low = X_low[:, :, :, np.newaxis] * X_low[:, :, np.newaxis, :].conj() # (n_frames, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels)
+            XX_high = X_high[:, :, :, np.newaxis] * X_high[:, :, np.newaxis, :].conj() # (n_frames, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
+            XX_low = XX_low.reshape(n_frames, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels)
+            XX_high = XX_high.reshape(n_frames, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            XX_low, XX_high = XX_low.transpose(0, 1, 2, 4, 3, 5), XX_high.transpose(0, 1, 2, 4, 3, 5) # (n_frames, n_blocks - n_remains, n_neighbors, n_neighbors, n_channels, n_channels), (n_frames, n_remains, n_neighbors + 1, n_neighbors + 1, n_channels, n_channels)
 
-            inv_R_low, inv_R_high = np.linalg.inv(R_low.conj() + eps * np.eye(n_neighbors)), np.linalg.inv(R_high.conj() + eps * np.eye(n_neighbors + n_remains)) # (n_sources, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low.conj() + eps * np.eye(n_neighbors)), np.linalg.inv(R_high.conj() + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
 
-            G_low = np.mean(XX_low * inv_R_low[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, n_blocks - 1, n_neighbors, n_neighbors, n_channels, n_channels)
-            G_high = np.mean(XX_high * inv_R_high[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, 1, n_neighbors + n_remains, n_neighbors + n_remains, n_channels, n_channels)
-            G_low, G_high = G_low.transpose(0, 1, 2, 4, 3, 5), G_high.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks - 1, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, 1, n_neighbors + n_remains, n_channels, n_neighbors + n_remains, n_channels)
-            G_low, G_high = G_low.reshape(n_sources, n_blocks - 1, n_neighbors * n_channels, n_neighbors * n_channels), G_high.reshape(n_sources, 1, (n_neighbors + n_remains) * n_channels, (n_neighbors + n_remains) * n_channels)
+            G_low = np.mean(XX_low * inv_R_low[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_channels, n_channels)
+            G_high = np.mean(XX_high * inv_R_high[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_channels, n_channels)
+            G_low, G_high = G_low.transpose(0, 1, 2, 4, 3, 5), G_high.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            G_low, G_high = G_low.reshape(n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), G_high.reshape(n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
             G_low, G_high = _to_Hermite(G_low), _to_Hermite(G_high)
             
-            inv_G_low, inv_G_high = np.linalg.inv(G_low), np.linalg.inv(G_high) # (n_sources, n_blocks - 1, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, 1, (n_neighbors + n_remains) * n_channels, (n_neighbors + n_remains) * n_channels)
-            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low.transpose(0, 1, 3, 2).conj(), inv_G_high.transpose(0, 1, 3, 2).conj() # (n_sources, n_blocks - 1, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, 1, (n_neighbors + n_remains) * n_channels, (n_neighbors + n_remains) * n_channels)
-            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.reshape(n_sources, n_blocks - 1, n_neighbors, n_channels, n_neighbors, n_channels), inv_G_high_Hermite.reshape(n_sources, 1, n_neighbors + n_remains, n_channels, n_neighbors + n_remains, n_channels)
-            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.transpose(0, 1, 2, 4, 3, 5), inv_G_high_Hermite.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks - 1, n_neighbors, n_neighbors, n_channels, n_channels), (n_sources, 1, n_neighbors + n_remains, n_neighbors + n_remains, n_channels, n_channels)
+            inv_G_low, inv_G_high = np.linalg.inv(G_low), np.linalg.inv(G_high) # (n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
+            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low.transpose(0, 1, 3, 2).conj(), inv_G_high.transpose(0, 1, 3, 2).conj() # (n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
+            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.reshape(n_sources, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels), inv_G_high_Hermite.reshape(n_sources, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.transpose(0, 1, 2, 4, 3, 5), inv_G_high_Hermite.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_channels, n_channels), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_channels, n_channels)
 
             A = np.linalg.inv(W_Hermite) # (n_bins, n_channels, n_sources)
             A = A.transpose(2, 0, 1) # (n_sources, n_bins, n_channels)
-            A_low, A_high = np.split(A, [(n_blocks - 1) * n_neighbors], axis=1) # (n_sources, (n_blocks - 1) * n_neighbors, n_channels), (n_sources, n_neighbors + n_remains, n_channels)
-            A_low, A_high = A_low.reshape(n_sources, n_blocks - 1, n_neighbors, n_channels), A_high.reshape(n_sources, 1, n_neighbors + n_remains, n_channels)
-            B_low = A_low[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_low_Hermite @ A_low[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, n_blocks - 1, n_neighbors, n_neighbors, 1, 1)
-            B_high = A_high[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_high_Hermite @ A_high[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, 1, n_neighbors + n_remains, n_neighbors + n_remains, 1, 1)
-            B_low, B_high = B_low.squeeze(axis=(4, 5)), B_high.squeeze(axis=(4, 5)) # (n_sources, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            A_low, A_high = np.split(A, [(n_blocks - n_remains) * n_neighbors], axis=1) # (n_sources, (n_blocks - n_remains) * n_neighbors, n_channels), (n_sources, n_remains * (n_neighbors + 1), n_channels)
+            A_low, A_high = A_low.reshape(n_sources, n_blocks - n_remains, n_neighbors, n_channels), A_high.reshape(n_sources, n_remains, n_neighbors + 1, n_channels)
+            B_low = A_low[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_low_Hermite @ A_low[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, 1, 1)
+            B_high = A_high[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_high_Hermite @ A_high[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, 1, 1)
+            B_low, B_high = B_low.squeeze(axis=(4, 5)), B_high.squeeze(axis=(4, 5)) # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1)
 
             # Update Lambda
-            Lambda_low, Lambda_high = np.split(Lambda, [(n_blocks - 1) * n_neighbors], axis=1)
-            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, n_blocks - 1, n_neighbors, 1), Lambda_high.reshape(n_sources, 1, n_neighbors + n_remains, 1)
+            Lambda_low, Lambda_high = np.split(Lambda, [(n_blocks - n_remains) * n_neighbors], axis=1)
+            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, n_blocks - n_remains, n_neighbors, 1), Lambda_high.reshape(n_sources, n_remains, n_neighbors + 1, 1)
 
             denominator_low, denominator_high = B_low.swapaxes(2, 3) @ Lambda_low.conj(), B_high.swapaxes(2, 3) @ Lambda_high.conj()
-            denominator_low, denominator_high = denominator_low.squeeze(axis=3), denominator_high.squeeze(axis=3) # (n_sources, n_blocks - 1, n_neighbors), (n_sources, 1, n_neighbors + n_remains)
+            denominator_low, denominator_high = denominator_low.squeeze(axis=3), denominator_high.squeeze(axis=3) # (n_sources, n_blocks - n_remains, n_neighbors), (n_sources, n_remains, n_neighbors + 1)
             denominator_low[np.abs(denominator_low) < eps], denominator_high[np.abs(denominator_high) < eps] = eps, eps
-            Lambda_low, Lambda_high = 1 / denominator_low, 1 / denominator_high # (n_sources, n_blocks - 1, n_neighbors), (n_sources, 1, n_neighbors + n_remains)
+            Lambda_low, Lambda_high = 1 / denominator_low, 1 / denominator_high # (n_sources, n_blocks - n_remains, n_neighbors), (n_sources, n_remains, n_neighbors + 1)
 
-            inv_G_low, inv_G_high = inv_G_low.reshape(n_sources, n_blocks - 1, n_neighbors, n_channels, n_neighbors, n_channels), inv_G_high.reshape(n_sources, 1, n_neighbors + n_remains, n_channels, n_neighbors + n_remains, n_channels)
-            GL_low, GL_high = inv_G_low * Lambda_low[:, :, np.newaxis, np.newaxis, :, np.newaxis], inv_G_high * Lambda_high[:, :, np.newaxis, np.newaxis, :, np.newaxis] # (n_sources, n_blocks - 1, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, 1, n_neighbors + n_remains, n_channels, n_neighbors + n_remains, n_channels)
-            GL_low, GL_high = GL_low.reshape(n_sources, n_blocks - 1, n_neighbors * n_channels, n_neighbors * n_channels), GL_high.reshape(n_sources, 1, (n_neighbors + n_remains) * n_channels, (n_neighbors + n_remains) * n_channels)
+            inv_G_low, inv_G_high = inv_G_low.reshape(n_sources, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels), inv_G_high.reshape(n_sources, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            GL_low, GL_high = inv_G_low * Lambda_low[:, :, np.newaxis, np.newaxis, :, np.newaxis], inv_G_high * Lambda_high[:, :, np.newaxis, np.newaxis, :, np.newaxis] # (n_sources, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            GL_low, GL_high = GL_low.reshape(n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), GL_high.reshape(n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
 
-            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, (n_blocks - 1) * n_neighbors), Lambda_high.reshape(n_sources, n_neighbors + n_remains)
+            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, (n_blocks - n_remains) * n_neighbors), Lambda_high.reshape(n_sources, n_remains * (n_neighbors + 1))
             Lambda = np.concatenate([Lambda_low, Lambda_high], axis=1) # (n_sources, n_bins)
-                        
-            A_low, A_high = A_low.reshape(n_sources, n_blocks - 1, n_neighbors * n_channels, 1), A_high.reshape(n_sources, 1, (n_neighbors + n_remains) * n_channels, 1)
-            W_low, W_high = np.squeeze(GL_low @ A_low, axis=3), np.squeeze(GL_high @ A_high, axis=3) # (n_sources, n_blocks - 1, n_neighbors * n_channels), (n_sources, 1, (n_neighbors + n_remains) * n_channels)
-            W_low, W_high = W_low.reshape(n_sources, (n_blocks - 1) * n_neighbors, n_channels), W_high.reshape(n_sources, n_neighbors + n_remains, n_channels)
+            
+            A_low, A_high = A_low.reshape(n_sources, n_blocks - n_remains, n_neighbors * n_channels, 1), A_high.reshape(n_sources, n_remains, (n_neighbors + 1) * n_channels, 1)
+            W_low, W_high = np.squeeze(GL_low @ A_low, axis=3), np.squeeze(GL_high @ A_high, axis=3) # (n_sources, n_blocks - n_remains, n_neighbors * n_channels), (n_sources, n_remains, (n_neighbors + 1) * n_channels)
+            W_low, W_high = W_low.reshape(n_sources, (n_blocks - n_remains) * n_neighbors, n_channels), W_high.reshape(n_sources, n_remains * (n_neighbors + 1), n_channels)
             W = np.concatenate([W_low, W_high], axis=1) # (n_sources, n_bins, n_channels)
             W = W.transpose(1, 0, 2)
             W_Hermite = W.conj() # (n_bins, n_sources, n_channels)
