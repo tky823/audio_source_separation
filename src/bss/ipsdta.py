@@ -434,7 +434,7 @@ class GaussIPSDTA(IPSDTAbase):
         Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
         Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
 
-        U, V = self.basis, self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
+        U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
         
         if n_remains > 0:
             U_low, U_high = U
@@ -470,26 +470,26 @@ class GaussIPSDTA(IPSDTAbase):
 
             U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
         else:
-            U = U.transpose(0, 4, 1, 2, 3)
-            Y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
-            
-            # Update activation
+            U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            Y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1)
+
             R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            R = _to_Hermite(R, axis1=3, axis2=4)
 
-            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RR = R_basis @ inv_R[:, np.newaxis, :, :, :, :]
-
             y_hat = RR @ Y[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, 1)
             
             R_hat = R_basis @ (np.eye(n_neighbors) - RR.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R_hat = _to_Hermite(R_hat)
 
             Phi = y_hat * y_hat.swapaxes(-2, -1).conj() + R_hat
-            Phi = _to_Hermite(Phi) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
+            Phi = _to_Hermite(Phi) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
             
-            inv_U = np.linalg.inv(U) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
-            trace = np.trace(inv_U[:, :, np.newaxis, :, :, :] @ Phi, axis1=-2, axis2=-1).real
+            inv_U = np.linalg.inv(U + eps * np.eye(n_neighbors)) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            UPhi = inv_U[:, :, np.newaxis, :, :, :] @ Phi
+            trace = np.trace(UPhi, axis1=-2, axis2=-1).real
 
             U = U.transpose(0, 2, 3, 4, 1)
         
@@ -678,7 +678,7 @@ class GaussIPSDTA(IPSDTAbase):
 
             det = np.linalg.det(R).real # (n_sources, n_frames, n_blocks)
 
-        det[det < eps] = eps
+        # det[det < eps] = eps
         logdet = np.sum(np.log(det), axis=2) # (n_sources, n_frames)
 
         Y_Hermite = Y.conj()
