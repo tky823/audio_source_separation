@@ -348,7 +348,6 @@ class GaussIPSDTA(IPSDTAbase):
     def update_basis_em(self):
         n_frames = self.n_frames
         n_sources = self.n_sources
-        n_basis = self.n_basis
         n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
         n_remains = self.n_remains
         eps = self.eps
