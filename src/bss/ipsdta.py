@@ -14,11 +14,13 @@ __authors_ipsdta__ = [
 ]
 
 __kwargs_ikeshita_ipsdta__ = {
-    'n_blocks': 1024
+    'n_blocks': 1024,
+    'spatial_iteration': 1
 }
 
 __kwargs_kondo_ipsdta__ = {
-    'n_blocks': 1024
+    'n_blocks': 1024,
+    'spatial_iteration': 10
 }
 
 class IPSDTAbase:
@@ -155,7 +157,7 @@ class GaussIPSDTA(IPSDTAbase):
         Reference: "Independent Positive Semidefinite Tensor Analysisin Blind Source Separation"
         See https://ieeexplore.ieee.org/document/8553546
     """
-    def __init__(self, n_basis=10, normalize=True, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
+    def __init__(self, n_basis=10, spatial_iteration=None, normalize=True, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
         """
         Args:
             n_basis <int>: Number of basis matrices
@@ -166,6 +168,7 @@ class GaussIPSDTA(IPSDTAbase):
         """
         super().__init__(n_basis=n_basis, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
+        self.spatial_iteration = spatial_iteration
         self.author = author
 
         if author.lower() in __authors_ipsdta__:
@@ -309,46 +312,31 @@ class GaussIPSDTA(IPSDTAbase):
         return s.format(**self.__dict__)
 
     def update_once(self):
+        spatial_iteration = self.spatial_iteration
         self.update_source_model()
-        self.update_spatial_model()
+
+        for spatial_idx in range(spatial_iteration):
+            self.update_spatial_model()
     
     def update_source_model(self):
         if self.author.lower() == 'ikeshita':
             self.update_source_model_em()
+        elif self.author.lower() == 'kondo':
+            self.update_source_model_em()
+            # self.update_source_model_mm()
         else:
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
-        
-        if self.normalize:
-            n_remains = self.n_remains
-
-            U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
-
-            if n_remains > 0:
-                U_low, U_high = U
-                U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors + n_remains, n_neighbors + n_remains)
-                trace_low, trace_high = np.trace(U_low, axis1=3, axis2=4), np.trace(U_high, axis1=3, axis2=4)
-                trace = np.concatenate([trace_low, trace_high], axis=2) # (n_sources, n_basis, n_blocks)
-                trace = trace.sum(axis=2) # (n_sources, n_basis)
-                U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, np.newaxis], U_high / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
-                U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
-                V = V * trace[:, :, np.newaxis]
-            else:
-                U = U.transpose(0, 4, 1, 2, 3)
-                trace = np.trace(U, axis1=3, axis2=4)
-                trace = trace.sum(axis=2) # (n_sources, n_basis)
-                U = U / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
-                U = U.transpose(0, 2, 3, 4, 1)
-                V = V * trace[:, :, np.newaxis]
     
-            self.basis, self.activation = U, V
-
     def update_spatial_model(self):
         algorithm_spatial = self.algorithm_spatial
 
         if algorithm_spatial == 'fixed-point':
             self.update_spatial_model_fixed_point()
+        elif algorithm_spatial == 'VCD':
+            self.update_spatial_model_vcd()
         else:
-            raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
+            raise NotImplementedError("Not support {}-based spatial model updates.".format(algorithm_spatial))
+
     
     def update_source_model_em(self):
         self.update_basis_em()
@@ -629,6 +617,80 @@ class GaussIPSDTA(IPSDTAbase):
         self.demix_filter = W_Hermite
         self.fixed_point = Lambda
     
+    def update_spatial_model_vcd(self):
+        n_bins, n_frames = self.n_bins, self.n_frames
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
+        n_remains = self.n_remains
+        eps = self.eps
+
+        X, W_Hermite = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
+        X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+        Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
+
+        U, V = self.basis.transpose(0, 4, 1, 2, 3), self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
+        R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+        R = _to_Hermite(R, axis1=3, axis2=4)
+
+        if n_remains == 0:
+            W_Hermite = W_Hermite.reshape(n_blocks, n_neighbors, n_sources, n_channels)
+            X = X.reshape(n_blocks, n_neighbors, n_frames, n_channels)
+            XX = X[:, :, np.newaxis, :, :, np.newaxis] * X[:, np.newaxis, :, :, np.newaxis, :].conj() # (n_blocks, n_neighbors, n_neighbors', n_frames, n_channels, n_channels')
+            XX_diag = np.diagonal(XX, axis1=1, axis2=2).transpose(0, 4, 1, 2, 3) # (n_blocks, n_neighbors, n_frames, n_channels, n_channels')
+
+            inv_R = np.linalg.inv(R.conj() + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R_diag = np.diagonal(inv_R, axis1=3, axis2=4) # (n_sources, n_frames, n_blocks, n_neighbors)
+            inv_R_diag = inv_R_diag.transpose(0, 2, 3, 1) # (n_sources, n_blocks, n_neighbors, n_frames)
+
+            Q = np.mean(inv_R_diag[:, :, :, :, np.newaxis, np.newaxis] * XX_diag[np.newaxis, :, :, :, :, :], axis=3) # (n_sources, n_blocks, n_neighbors, n_channels, n_channels')
+            
+            inv_R = np.linalg.inv(R.conj() + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors')
+            inv_R = inv_R.transpose(0, 2, 3, 4, 1) # (n_sources, n_blocks, n_neighbors, n_neighbors', n_frames)
+
+            E = np.eye(n_sources, n_channels)
+            E = np.tile(E, reps=(n_blocks, n_neighbors, 1, 1)) # (n_blocks, n_neighbors, n_sources, n_channels)
+
+            for source_idx in range(n_sources):
+                W_n = W_Hermite[:, :, source_idx, :].conj() # (n_blocks, n_neighbors, n_channels)
+                Q_n = Q[source_idx, :, :, :, :] # (n_blocks, n_neighbors, n_channels, n_channels')
+
+                inv_R_n = inv_R[source_idx, :, :, :, :] # (n_blocks, n_neighbors, n_neighbors', n_frames)
+                XXw_n = XX @ W_n[:, np.newaxis, :, np.newaxis, :, np.newaxis] # (n_blocks, n_neighbors, n_neighbors', n_frames, n_channels, 1)
+                gamma = np.mean(XXw_n * inv_R_n[:, :, :, :, np.newaxis, np.newaxis], axis=(3, 5)) # (n_blocks, n_neighbors, n_neighbors', n_channels)
+                mask = 1 - np.eye(n_neighbors)
+                gamma = mask[np.newaxis, :, :, np.newaxis] * gamma # (n_blocks, n_neighbors, n_neighbors', n_channels)
+                gamma = gamma.sum(axis=2) # (n_blocks, n_neighbors, n_channels)
+
+                WQ_n = W_Hermite @ Q_n # (n_blocks, n_neighbors, n_channels, n_channels)
+                e_n = E[:, :, source_idx, :] # (n_blocks, n_neighbors, n_channels)
+
+                xi = np.linalg.solve(WQ_n, e_n) # (n_blocks, n_neighbors, n_channels)
+                xi_hat = np.linalg.solve(Q_n, gamma) # (n_blocks, n_neighbors, n_channels)
+
+                eta = np.squeeze(xi[:, :, np.newaxis, :].conj() @ Q_n @ xi[:, :, :, np.newaxis], axis=(2, 3)) # (n_blocks, n_neighbors)
+                eta_hat = np.squeeze(xi[:, :, np.newaxis, :].conj() @ Q_n @ xi_hat[:, :, :, np.newaxis], axis=(2, 3)) # (n_blocks, n_neighbors)
+                eta, eta_hat = eta.real, eta_hat.real
+
+                denominator = np.abs(eta_hat)**2
+                condition = denominator < eps
+                denominator[condition] = eps
+                eta_hat[condition] = eps
+                
+                coeff_if = 1 / np.sqrt(eta)
+                coeff = 0.5 * eta / eta_hat * (1 - np.sqrt(1 + 4 * eta / denominator))
+                coeff[condition] = coeff_if[condition]
+
+                w_n = coeff[:, :, np.newaxis] * xi - xi_hat
+                W_Hermite[:, :, source_idx, :] = w_n.conj()
+                # if condition number is too big, `denominator[denominator < eps] = eps` may diverge of cost function.
+            
+            W_Hermite = W_Hermite.reshape(n_bins, n_sources, n_channels)
+        else:
+            raise NotImplementedError
+
+        self.demix_filter = W_Hermite
+
     def compute_negative_loglikelihood(self):
         if self.author.lower() in __authors_ipsdta__:
             loss = self.compute_negative_loglikelihood_block()
