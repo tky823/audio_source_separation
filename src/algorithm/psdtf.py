@@ -37,7 +37,7 @@ class PSDTFbase:
         n_bins, _, n_frames = self.target.shape
         is_complex = isinstance(self.target.dtype, np.complex)
 
-        self.is_copmlex = is_complex
+        self.is_complex = is_complex
 
         if not hasattr(self, 'basis'):
             V = np.random.rand(n_basis, n_bins) # should be positive semi-definite
@@ -70,7 +70,6 @@ class PSDTFbase:
             # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
             V, H = self.basis, self.activation
             VH = np.sum(V[:, :, :, np.newaxis] * H[np.newaxis, np.newaxis, :, :], axis=2) # (n_frames, n_bins, n_bins)
-            print(VH.shape)
 
             loss = self.criterion(VH.transpose(2, 0, 1), target.transpose(2, 0, 1))
             self.loss.append(loss.sum())
