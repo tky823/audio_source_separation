@@ -4,15 +4,30 @@ from algorithm.projection_back import projection_back
 
 EPS = 1e-12
 
+__algorithms_spatial__ = [
+    'fixed-point',
+    'VCD'
+]
+
+__authors_ipsdta__ = [
+    'ikeshita', 'kondo'
+]
+
 __kwargs_ikeshita_ipsdta__ = {
-    'n_blocks': 1024
+    'n_blocks': 1024,
+    'spatial_iteration': 1
+}
+
+__kwargs_kondo_ipsdta__ = {
+    'n_blocks': 1024,
+    'spatial_iteration': 10
 }
 
 class IPSDTAbase:
     """
     Independent Positive Semi-Definite Tensor Analysis
     """
-    def __init__(self, n_basis=10, callbacks=None, reference_id=0, recordable_loss=True, eps=EPS):
+    def __init__(self, n_basis=10, normalize=True, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, recordable_loss=True, eps=EPS):
         if callbacks is not None:
             if callable(callbacks):
                 callbacks = [callbacks]
@@ -23,6 +38,10 @@ class IPSDTAbase:
         self.eps = eps
         
         self.n_basis = n_basis
+        self.normalize = normalize
+
+        assert algorithm_spatial in __algorithms_spatial__, "Choose from {} as `algorithm_spatial`.".format(__algorithms_spatial__)
+        self.algorithm_spatial = algorithm_spatial
 
         self.input = None
         self.recordable_loss = recordable_loss
@@ -59,7 +78,8 @@ class IPSDTAbase:
         if not hasattr(self, 'basis'):
             U = 0.5 * np.random.rand(n_sources, n_basis, n_bins, n_bins) + 0.5j * np.random.rand(n_sources, n_basis, n_bins, n_bins) # should be positive semi-definite
             U = U.swapaxes(-2, -1).conj() @ U
-            self.basis = _to_Hermite(U, axis1=3, axis2=4)
+            U = _to_Hermite(U, axis1=3, axis2=4)
+            self.basis = U.transpose(0, 2, 3, 1)
         else:
             self.basis = self.basis.copy()
         if not hasattr(self, 'activation'):
@@ -106,6 +126,7 @@ class IPSDTAbase:
     def __repr__(self):
         s = "IPSDTA("
         s += "n_basis={n_basis}"
+        s += ", normalize={normalize}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -136,19 +157,31 @@ class GaussIPSDTA(IPSDTAbase):
         Reference: "Independent Positive Semidefinite Tensor Analysisin Blind Source Separation"
         See https://ieeexplore.ieee.org/document/8553546
     """
-    def __init__(self, n_basis=10, callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
+    def __init__(self, n_basis=10, spatial_iteration=None, normalize=True, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
         """
         Args:
+            n_basis <int>: Number of basis matrices
+            algorithm_spatial: 'fixed-point': fixed-point iteration, 'VCD': vector-wise coordinate descent
+            callbacks <callable> or <list<callable>>:
+            reference_id <int>:
+            author <str>: 'Ikeshita'
         """
-        super().__init__(n_basis=n_basis, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
+        self.spatial_iteration = spatial_iteration
         self.author = author
-        
-        if author.lower() == 'ikeshita':
-            if set(kwargs) - set(__kwargs_ikeshita_ipsdta__) != set():
-                raise ValueError("Invalid keywords.")
-            for key in __kwargs_ikeshita_ipsdta__.keys():
-                setattr(self, key, __kwargs_ikeshita_ipsdta__[key])
+
+        if author.lower() in __authors_ipsdta__:
+            if author.lower() == 'ikeshita':
+                if set(kwargs) - set(__kwargs_ikeshita_ipsdta__) != set():
+                    raise ValueError("Invalid keywords.")
+                for key in __kwargs_ikeshita_ipsdta__.keys():
+                    setattr(self, key, __kwargs_ikeshita_ipsdta__[key])
+            elif author.lower() == 'kondo':
+                if set(kwargs) - set(__kwargs_kondo_ipsdta__) != set():
+                    raise ValueError("Invalid keywords.")
+                for key in __kwargs_kondo_ipsdta__.keys():
+                    setattr(self, key, __kwargs_kondo_ipsdta__[key])
             for key in kwargs.keys():
                 setattr(self, key, kwargs[key])
         else:
@@ -184,8 +217,8 @@ class GaussIPSDTA(IPSDTAbase):
                 for callback in self.callbacks:
                     callback(self)
 
-            X, W = input, self.demix_filter
-            Y = self.separate(X, demix_filter=W)
+        X, W = input, self.demix_filter
+        Y = self.separate(X, demix_filter=W)
 
         reference_id = self.reference_id
         
@@ -201,10 +234,10 @@ class GaussIPSDTA(IPSDTAbase):
         for key in kwargs.keys():
             setattr(self, key, kwargs[key])
         
-        if self.author.lower() == 'ikeshita':
-            self._reset_ikeshita(**kwargs)
+        if self.author.lower() in __authors_ipsdta__:
+            self._reset_block(**kwargs)
     
-    def _reset_ikeshita(self, **kwargs):
+    def _reset_block(self, **kwargs):
         n_basis = self.n_basis
         n_blocks = self.n_blocks
 
@@ -226,32 +259,52 @@ class GaussIPSDTA(IPSDTAbase):
         self.estimation = self.separate(X, demix_filter=W_Hermite)
 
         n_neighbors = n_bins  // n_blocks
-        n_paddings = (n_neighbors - n_bins % n_neighbors) % n_neighbors
+        n_remains = n_bins % n_blocks
 
         self.n_blocks, self.n_neighbors = n_blocks, n_neighbors
-        self.n_paddings = n_paddings
+        self.n_remains = n_remains
 
         if not hasattr(self, 'basis'):
-            U = np.eye(n_neighbors, dtype=np.complex128)
-            if n_paddings > 0:
-                U = np.tile(U, reps=(n_sources, n_basis, n_blocks + 1, 1, 1))
+            if n_remains > 0:
+                eye_low = np.eye(n_neighbors, dtype=np.complex128)
+                eye_high = np.eye(n_neighbors + 1, dtype=np.complex128)
+                eye_low = np.tile(eye_low, reps=(n_sources, n_basis, n_blocks - n_remains, 1, 1))
+                eye_high = np.tile(eye_high, reps=(n_sources, n_basis, n_remains, 1, 1))
+                U_low, U_high = np.random.rand(n_sources, n_basis, n_blocks - n_remains, n_neighbors), np.random.rand(n_sources, n_basis, n_remains, n_neighbors + 1)
+                U_low, U_high = U_low[:, :, :, :, np.newaxis] * eye_low, U_high[:, :, :, :, np.newaxis] * eye_high
+                U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
             else:
-                U = np.tile(U, reps=(n_sources, n_basis, n_blocks, 1, 1))
+                eye = np.eye(n_neighbors, dtype=np.complex128)
+                eye = np.tile(eye, reps=(n_sources, n_basis, n_blocks, 1, 1))
+                U = np.random.rand(n_sources, n_basis, n_blocks, n_neighbors)
+                U = U[:, :, :, :, np.newaxis] * eye
+                U = U.transpose(0, 2, 3, 4, 1)
+
             self.basis = U
         else:
-            self.basis = self.basis.copy()
+            if n_remains > 0:
+                U_low, U_high = self.basis
+                U_low, U_high = U_low.copy(), U_high.copy()
+                U = U_low, U_high
+            else:
+                U = self.basis
+                U = U.copy()
+            self.basis = U
         if not hasattr(self, 'activation'):
             self.activation = np.random.rand(n_sources, n_basis, n_frames)
         else:
             self.activation = self.activation.copy()
-        if not hasattr(self, 'fixed_point'):
-            self.fixed_point = np.ones((n_sources, n_bins), dtype=np.complex128)
-        else:
-            self.fixed_point = self.fixed_point.copy()
+    
+        if self.algorithm_spatial == 'fixed-point':
+            if not hasattr(self, 'fixed_point'):
+                self.fixed_point = np.ones((n_sources, n_bins), dtype=np.complex128)
+            else:
+                self.fixed_point = self.fixed_point.copy()
 
     def __repr__(self):
         s = "Gauss-IPSDTA("
         s += "n_basis={n_basis}"
+        s += ", normalize={normalize}"
         if self.author.lower() == 'ikeshita':
             s += ", n_blocks={n_blocks}"
         s += ")"
@@ -259,95 +312,102 @@ class GaussIPSDTA(IPSDTAbase):
         return s.format(**self.__dict__)
 
     def update_once(self):
+        spatial_iteration = self.spatial_iteration
         self.update_source_model()
-        self.update_spatial_model()
+
+        for spatial_idx in range(spatial_iteration):
+            self.update_spatial_model()
     
     def update_source_model(self):
         if self.author.lower() == 'ikeshita':
             self.update_source_model_em()
+        elif self.author.lower() == 'kondo':
+            self.update_source_model_em()
+            # self.update_source_model_mm()
         else:
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
     
     def update_spatial_model(self):
-        if self.author.lower() == 'ikeshita':
+        algorithm_spatial = self.algorithm_spatial
+
+        if algorithm_spatial == 'fixed-point':
             self.update_spatial_model_fixed_point()
+        elif algorithm_spatial == 'VCD':
+            self.update_spatial_model_vcd()
         else:
-            raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
+            raise NotImplementedError("Not support {}-based spatial model updates.".format(algorithm_spatial))
+
     
     def update_source_model_em(self):
         self.update_basis_em()
         self.update_activation_em()
-        # TODO: normalize
     
     def update_basis_em(self):
         n_frames = self.n_frames
         n_sources = self.n_sources
-        n_basis = self.n_basis
         n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
-        n_paddings = self.n_paddings
+        n_remains = self.n_remains
         eps = self.eps
 
         X, W_Hermite = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
         Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
 
-        U, V = self.basis, self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
+        U, V = self.basis, self.activation # (n_sources, n_basis, n_frames)
         
-        if n_paddings > 0:
-            Y_low, Y_high = np.split(Y, [n_blocks * n_neighbors], axis=2) # (n_sources, n_frames, n_blocks * n_neighbors), (n_sources, n_frames, n_paddings)
-            Y_low = Y_low.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
-            Y_high = Y_high.reshape(n_sources, n_frames, 1, n_neighbors - n_paddings, 1) # (n_sources, n_frames, 1, n_neighbors - n_paddings, 1)
+        if n_remains > 0:
+            U_low, U_high = U
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + n_remains, n_neighbors + n_remains)
+            Y_low, Y_high = np.split(Y, [(n_blocks - n_remains) * n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
+            Y_low = Y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
+            Y_high = Y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1, 1)
             
-            R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-
-            R_basis_low, R_basis_high = np.split(R_basis, [n_blocks], axis=3) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors, n_neighbors)
-            R_low, R_high = np.split(R, [n_blocks], axis=2) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors, n_neighbors)
-            R_basis_high = R_basis_high[..., :-n_paddings, :-n_paddings] # (n_sources, n_basis, n_frames, 1, n_paddings, n_paddings)
-            R_high = R_high[..., :-n_paddings, :-n_paddings] # (n_sources, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            R_basis_low = U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_basis_high = U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            R_low, R_high = np.sum(R_basis_low, axis=1), np.sum(R_basis_high, axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low, R_high = _to_Hermite(R_low, axis1=3, axis2=4), _to_Hermite(R_high, axis1=3, axis2=4)
 
-            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors - n_paddings)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             RR_low = R_basis_low @ inv_R_low[:, np.newaxis, :, :, :, :]
             RR_high = R_basis_high @ inv_R_high[:, np.newaxis, :, :, :, :]
-            y_hat_low = RR_low @ Y_low[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, 1)
-            y_hat_high = RR_high @ Y_high[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, 1, n_neighbors - n_paddings, 1)
+            y_hat_low = RR_low @ Y_low[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, 1)
+            y_hat_high = RR_high @ Y_high[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, 1)
 
-            R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R_hat_high = R_basis_high @ (np.eye(n_neighbors - n_paddings) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_hat_high = R_basis_high @ (np.eye(n_neighbors + 1) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_hat_low, R_hat_high = _to_Hermite(R_hat_low), _to_Hermite(R_hat_high)
 
             Phi_low = y_hat_low * y_hat_low.swapaxes(-2, -1).conj() + R_hat_low
             Phi_high = y_hat_high * y_hat_high.swapaxes(-2, -1).conj() + R_hat_high
-            Phi_low, Phi_high = _to_Hermite(Phi_low), _to_Hermite(Phi_high) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            Phi_low, Phi_high = _to_Hermite(Phi_low), _to_Hermite(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
             
             V[V < eps] = eps
-            U_low = np.mean(Phi_low[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
-            U_high = np.mean(Phi_high[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            U_low = np.mean(Phi_low[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors)
+            U_high = np.mean(Phi_high[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
             U_low, U_high = _to_Hermite(U_low, axis1=3, axis2=4), _to_Hermite(U_high, axis1=3, axis2=4)
-            
-            U = np.tile(np.eye(n_neighbors, dtype=np.complex128), reps=(n_sources, n_basis, n_blocks + 1, 1, 1))
-            U[:, :, :n_blocks, :, :] = U_low
-            U[:, :, n_blocks:, :-n_paddings, :-n_paddings] = U_high
+            U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
         else:
-            Y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
-            
+            U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            Y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1)
+
             R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            R = _to_Hermite(R, axis1=3, axis2=4)
 
-            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RR = R_basis @ inv_R[:, np.newaxis, :, :, :, :]
             y_hat = RR @ Y[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, 1)
-            
+
             R_hat = R_basis @ (np.eye(n_neighbors) - RR.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R_hat = _to_Hermite(R_hat)
 
             Phi = y_hat * y_hat.swapaxes(-2, -1).conj() + R_hat
             Phi = _to_Hermite(Phi) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
-            
-            V[V < eps] = eps # here
+
+            V[V < eps] = eps
             U = np.mean(Phi[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
             U = _to_Hermite(U, axis1=3, axis2=4)
+            U = U.transpose(0, 2, 3, 4, 1)
         
         self.basis, self.activation = U, V
     
@@ -355,69 +415,71 @@ class GaussIPSDTA(IPSDTAbase):
         n_bins, n_frames = self.n_bins, self.n_frames
         n_sources = self.n_sources
         n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
-        n_paddings = self.n_paddings
+        n_remains = self.n_remains
         eps = self.eps
 
         X, W_Hermite = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
         Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
 
-        U, V = self.basis, self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
+        U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
         
-        if n_paddings > 0:
-            Y_low, Y_high = np.split(Y, [n_blocks * n_neighbors], axis=2) # (n_sources, n_frames, n_blocks * n_neighbors), (n_sources, n_frames, n_paddings)
-            Y_low = Y_low.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
-            Y_high = Y_high.reshape(n_sources, n_frames, 1, n_neighbors - n_paddings, 1) # (n_sources, n_frames, 1, n_neighbors - n_paddings, 1)
+        if n_remains > 0:
+            U_low, U_high = U
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
+            Y_low, Y_high = np.split(Y, [(n_blocks - n_remains) * n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
+            Y_low = Y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
+            Y_high = Y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1, 1)
+            
+            R_basis_low = U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_basis_high = U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            R_low, R_high = np.sum(R_basis_low, axis=1), np.sum(R_basis_high, axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            R_low, R_high = _to_Hermite(R_low, axis1=3, axis2=4), _to_Hermite(R_high, axis1=3, axis2=4)
 
-            R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-
-            R_basis_low, R_basis_high = np.split(R_basis, [n_blocks], axis=3) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors, n_neighbors)
-            R_low, R_high = np.split(R, [n_blocks], axis=2) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors, n_neighbors)
-            R_basis_high = R_basis_high[..., :-n_paddings, :-n_paddings] # (n_sources, n_basis, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
-            R_high = R_high[..., :-n_paddings, :-n_paddings] # (n_sources, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
-
-            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors - n_paddings)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
             RR_low = R_basis_low @ inv_R_low[:, np.newaxis, :, :, :, :]
             RR_high = R_basis_high @ inv_R_high[:, np.newaxis, :, :, :, :]
-            y_hat_low = RR_low @ Y_low[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, 1)
-            y_hat_high = RR_high @ Y_high[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, 1, n_neighbors - n_paddings, 1)
+            y_hat_low = RR_low @ Y_low[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, 1)
+            y_hat_high = RR_high @ Y_high[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, 1)
 
-            R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R_hat_high = R_basis_high @ (np.eye(n_neighbors - n_paddings) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_hat_high = R_basis_high @ (np.eye(n_neighbors + 1) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_hat_low, R_hat_high = _to_Hermite(R_hat_low), _to_Hermite(R_hat_high)
 
             Phi_low = y_hat_low * y_hat_low.swapaxes(-2, -1).conj() + R_hat_low
             Phi_high = y_hat_high * y_hat_high.swapaxes(-2, -1).conj() + R_hat_high
-            Phi_low, Phi_high = _to_Hermite(Phi_low), _to_Hermite(Phi_high) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            Phi_low, Phi_high = _to_Hermite(Phi_low), _to_Hermite(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             
-            U_low, U_high = np.split(U, [n_blocks], axis=2) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors, n_neighbors)
-            U_high = U_high[..., :-n_paddings, :-n_paddings]
-            inv_U_low, inv_U_high = np.linalg.inv(U_low + eps * np.eye(n_neighbors)), np.linalg.inv(U_high + eps * np.eye(n_neighbors - n_paddings)) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors, n_neighbors)
+            inv_U_low, inv_U_high = np.linalg.inv(U_low + eps * np.eye(n_neighbors)), np.linalg.inv(U_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
             UPhi_low, UPhi_high = inv_U_low[:, :, np.newaxis, :, :, :] @ Phi_low, inv_U_high[:, :, np.newaxis, :, :, :] @ Phi_high
             trace_low = np.trace(UPhi_low, axis1=-2, axis2=-1).real
             trace_high = np.trace(UPhi_high, axis1=-2, axis2=-1).real
             trace = np.concatenate([trace_low, trace_high], axis=3)
+
+            U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
         else:
-            Y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
-            
-            # Update activation
+            U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            Y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1)
+
             R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            R = _to_Hermite(R, axis1=3, axis2=4)
 
-            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RR = R_basis @ inv_R[:, np.newaxis, :, :, :, :]
-
             y_hat = RR @ Y[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, 1)
             
             R_hat = R_basis @ (np.eye(n_neighbors) - RR.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R_hat = _to_Hermite(R_hat)
 
             Phi = y_hat * y_hat.swapaxes(-2, -1).conj() + R_hat
-            Phi = _to_Hermite(Phi) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
+            Phi = _to_Hermite(Phi) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
             
-            inv_U = np.linalg.inv(U) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
-            trace = np.trace(inv_U[:, :, np.newaxis, :, :, :] @ Phi, axis1=-2, axis2=-1).real
+            inv_U = np.linalg.inv(U + eps * np.eye(n_neighbors)) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            UPhi = inv_U[:, :, np.newaxis, :, :, :] @ Phi
+            trace = np.trace(UPhi, axis1=-2, axis2=-1).real
+
+            U = U.transpose(0, 2, 3, 4, 1)
         
         trace[trace < 0] = 0
         trace = np.sum(trace, axis=3) # (n_sources, n_basis, n_frames)
@@ -426,10 +488,10 @@ class GaussIPSDTA(IPSDTAbase):
         self.basis, self.activation = U, V
 
     def update_spatial_model_fixed_point(self):
-        n_bins, n_frames = self.n_bins, self.n_frames
+        n_frames = self.n_frames
         n_sources, n_channels = self.n_sources, self.n_channels
         n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
-        n_paddings = self.n_paddings
+        n_remains = self.n_remains
         eps = self.eps
 
         X, W_Hermite = self.input, self.demix_filter
@@ -437,70 +499,75 @@ class GaussIPSDTA(IPSDTAbase):
         X = X.transpose(0, 2, 1) # (n_channels, n_frames, n_bins)
         Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
 
-        U, V = self.basis, self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
-        R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-        R = _to_Hermite(R, axis1=3, axis2=4)
-
+        U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
         Lambda = self.fixed_point # (n_sources, n_bins)
 
-        if n_paddings > 0:
-            X_low, X_high = np.split(X, [n_blocks * n_neighbors], axis=2) # (n_channels, n_frames, n_blocks * n_neighbors), (n_channels, n_frames, n_paddings)
-            X_low, X_high = X_low.reshape(n_channels, n_frames, n_blocks, n_neighbors), X_high.reshape(n_channels, n_frames, 1, n_neighbors - n_paddings)
-            X_low, X_high = X_low.transpose(1, 2, 3, 0).reshape(n_frames, n_blocks, n_neighbors * n_channels), X_high.transpose(1, 2, 3, 0).reshape(n_frames, 1, (n_neighbors - n_paddings) * n_channels)
+        if n_remains > 0:
+            U_low, U_high = U
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
+            R_low = np.sum(U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            R_low, R_high = _to_Hermite(R_low, axis1=3, axis2=4), _to_Hermite(R_high, axis1=3, axis2=4)
+
+            X_low, X_high = np.split(X, [(n_blocks - n_remains) * n_neighbors], axis=2) # (n_channels, n_frames, (n_blocks - n_remains) * n_neighbors), (n_channels, n_frames, n_remains * (n_neighbors + 1))
+            X_low, X_high = X_low.reshape(n_channels, n_frames, n_blocks - n_remains, n_neighbors), X_high.reshape(n_channels, n_frames, n_remains, n_neighbors + 1)
+            X_low, X_high = X_low.transpose(1, 2, 3, 0).reshape(n_frames, n_blocks - n_remains, n_neighbors * n_channels), X_high.transpose(1, 2, 3, 0).reshape(n_frames, n_remains, (n_neighbors + 1) * n_channels)
 
             # Compute G
-            XX_low = X_low[:, :, :, np.newaxis] * X_low[:, :, np.newaxis, :].conj() # (n_frames, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
-            XX_high = X_high[:, :, :, np.newaxis] * X_high[:, :, np.newaxis, :].conj() # (n_frames, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
-            XX_low = XX_low.reshape(n_frames, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
-            XX_high = XX_high.reshape(n_frames, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
-            XX_low, XX_high = XX_low.transpose(0, 1, 2, 4, 3, 5), XX_high.transpose(0, 1, 2, 4, 3, 5) # (n_frames, n_blocks, n_neighbors, n_neighbors, n_channels, n_channels), (n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings, n_channels, n_channels)
+            XX_low = X_low[:, :, :, np.newaxis] * X_low[:, :, np.newaxis, :].conj() # (n_frames, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels)
+            XX_high = X_high[:, :, :, np.newaxis] * X_high[:, :, np.newaxis, :].conj() # (n_frames, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
+            XX_low = XX_low.reshape(n_frames, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels)
+            XX_high = XX_high.reshape(n_frames, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            XX_low, XX_high = XX_low.transpose(0, 1, 2, 4, 3, 5), XX_high.transpose(0, 1, 2, 4, 3, 5) # (n_frames, n_blocks - n_remains, n_neighbors, n_neighbors, n_channels, n_channels), (n_frames, n_remains, n_neighbors + 1, n_neighbors + 1, n_channels, n_channels)
 
-            R_low, R_high = np.split(R, [n_blocks], axis=2) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors, n_neighbors)
-            R_high = R_high[..., :-n_paddings, :-n_paddings] # (n_sources, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
-            inv_R_low, inv_R_high = np.linalg.inv(R_low.conj() + eps * np.eye(n_neighbors)), np.linalg.inv(R_high.conj() + eps * np.eye(n_neighbors - n_paddings)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low.conj() + eps * np.eye(n_neighbors)), np.linalg.inv(R_high.conj() + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
 
-            G_low = np.mean(XX_low * inv_R_low[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, n_blocks, n_neighbors, n_neighbors, n_channels, n_channels)
-            G_high = np.mean(XX_high * inv_R_high[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, 1, n_neighbors - n_paddings, n_neighbors - n_paddings, n_channels, n_channels)
-            G_low, G_high = G_low.transpose(0, 1, 2, 4, 3, 5), G_high.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
-            G_low, G_high = G_low.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), G_high.reshape(n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
+            G_low = np.mean(XX_low * inv_R_low[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_channels, n_channels)
+            G_high = np.mean(XX_high * inv_R_high[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_channels, n_channels)
+            G_low, G_high = G_low.transpose(0, 1, 2, 4, 3, 5), G_high.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            G_low, G_high = G_low.reshape(n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), G_high.reshape(n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
             G_low, G_high = _to_Hermite(G_low), _to_Hermite(G_high)
             
-            inv_G_low, inv_G_high = np.linalg.inv(G_low), np.linalg.inv(G_high) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
-            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low.transpose(0, 1, 3, 2).conj(), inv_G_high.transpose(0, 1, 3, 2).conj() # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
-            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.reshape(n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels), inv_G_high_Hermite.reshape(n_sources, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
-            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.transpose(0, 1, 2, 4, 3, 5), inv_G_high_Hermite.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_neighbors, n_channels, n_channels), (n_sources, 1, n_neighbors - n_paddings, n_neighbors - n_paddings, n_channels, n_channels)
+            inv_G_low, inv_G_high = np.linalg.inv(G_low), np.linalg.inv(G_high) # (n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
+            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low.transpose(0, 1, 3, 2).conj(), inv_G_high.transpose(0, 1, 3, 2).conj() # (n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
+            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.reshape(n_sources, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels), inv_G_high_Hermite.reshape(n_sources, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low_Hermite.transpose(0, 1, 2, 4, 3, 5), inv_G_high_Hermite.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_channels, n_channels), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_channels, n_channels)
 
             A = np.linalg.inv(W_Hermite) # (n_bins, n_channels, n_sources)
             A = A.transpose(2, 0, 1) # (n_sources, n_bins, n_channels)
-            A_low, A_high = np.split(A, [n_blocks * n_neighbors], axis=1) # (n_sources, n_blocks * n_neighbors, n_channels), (n_sources, n_neighbors, n_channels)
-            A_low, A_high = A_low.reshape(n_sources, n_blocks, n_neighbors, n_channels), A_high.reshape(n_sources, 1, n_neighbors - n_paddings, n_channels)
-            B_low = A_low[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_low_Hermite @ A_low[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, n_blocks, n_neighbors, n_neighbors, 1, 1)
-            B_high = A_high[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_high_Hermite @ A_high[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, 1, n_neighbors - n_paddings, n_neighbors - n_paddings, 1, 1)
-            B_low, B_high = B_low.squeeze(axis=(4, 5)), B_high.squeeze(axis=(4, 5)) # (n_sources, n_blocks, n_neighbors, n_neighbors), (n_sources, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
+            A_low, A_high = np.split(A, [(n_blocks - n_remains) * n_neighbors], axis=1) # (n_sources, (n_blocks - n_remains) * n_neighbors, n_channels), (n_sources, n_remains * (n_neighbors + 1), n_channels)
+            A_low, A_high = A_low.reshape(n_sources, n_blocks - n_remains, n_neighbors, n_channels), A_high.reshape(n_sources, n_remains, n_neighbors + 1, n_channels)
+            B_low = A_low[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_low_Hermite @ A_low[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, 1, 1)
+            B_high = A_high[:, :, :, np.newaxis, np.newaxis, :].conj() @ inv_G_high_Hermite @ A_high[:, :, np.newaxis, :, :, np.newaxis] # (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, 1, 1)
+            B_low, B_high = B_low.squeeze(axis=(4, 5)), B_high.squeeze(axis=(4, 5)) # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1)
 
             # Update Lambda
-            Lambda_low, Lambda_high = np.split(Lambda, [n_blocks * n_neighbors], axis=1)
-            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, n_blocks, n_neighbors, 1), Lambda_high.reshape(n_sources, 1, n_neighbors - n_paddings, 1)
+            Lambda_low, Lambda_high = np.split(Lambda, [(n_blocks - n_remains) * n_neighbors], axis=1)
+            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, n_blocks - n_remains, n_neighbors, 1), Lambda_high.reshape(n_sources, n_remains, n_neighbors + 1, 1)
 
             denominator_low, denominator_high = B_low.swapaxes(2, 3) @ Lambda_low.conj(), B_high.swapaxes(2, 3) @ Lambda_high.conj()
-            denominator_low, denominator_high = denominator_low.squeeze(axis=3), denominator_high.squeeze(axis=3) # (n_sources, n_blocks, n_neighbors), (n_sources, 1, n_neighbors - n_paddings)
+            denominator_low, denominator_high = denominator_low.squeeze(axis=3), denominator_high.squeeze(axis=3) # (n_sources, n_blocks - n_remains, n_neighbors), (n_sources, n_remains, n_neighbors + 1)
             denominator_low[np.abs(denominator_low) < eps], denominator_high[np.abs(denominator_high) < eps] = eps, eps
-            Lambda_low, Lambda_high = 1 / denominator_low, 1 / denominator_high # (n_sources, n_blocks, n_neighbors), (n_sources, 1, n_neighbors - n_paddings)
+            Lambda_low, Lambda_high = 1 / denominator_low, 1 / denominator_high # (n_sources, n_blocks - n_remains, n_neighbors), (n_sources, n_remains, n_neighbors + 1)
 
-            inv_G_low, inv_G_high = inv_G_low.reshape(n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels), inv_G_high.reshape(n_sources, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
-            GL_low, GL_high = inv_G_low * Lambda_low[:, :, np.newaxis, np.newaxis, :, np.newaxis], inv_G_high * Lambda_high[:, :, np.newaxis, np.newaxis, :, np.newaxis] # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, 1, n_neighbors - n_paddings, n_channels, n_neighbors - n_paddings, n_channels)
-            GL_low, GL_high = GL_low.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels), GL_high.reshape(n_sources, 1, (n_neighbors - n_paddings) * n_channels, (n_neighbors - n_paddings) * n_channels)
+            inv_G_low, inv_G_high = inv_G_low.reshape(n_sources, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels), inv_G_high.reshape(n_sources, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            GL_low, GL_high = inv_G_low * Lambda_low[:, :, np.newaxis, np.newaxis, :, np.newaxis], inv_G_high * Lambda_high[:, :, np.newaxis, np.newaxis, :, np.newaxis] # (n_sources, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
+            GL_low, GL_high = GL_low.reshape(n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), GL_high.reshape(n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
 
-            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, n_blocks * n_neighbors), Lambda_high.reshape(n_sources, n_neighbors - n_paddings)
+            Lambda_low, Lambda_high = Lambda_low.reshape(n_sources, (n_blocks - n_remains) * n_neighbors), Lambda_high.reshape(n_sources, n_remains * (n_neighbors + 1))
             Lambda = np.concatenate([Lambda_low, Lambda_high], axis=1) # (n_sources, n_bins)
-                        
-            A_low, A_high = A_low.reshape(n_sources, n_blocks, n_neighbors * n_channels, 1), A_high.reshape(n_sources, 1, (n_neighbors - n_paddings) * n_channels, 1)
-            W_low, W_high = np.squeeze(GL_low @ A_low, axis=3), np.squeeze(GL_high @ A_high, axis=3) # (n_sources, n_blocks, n_neighbors * n_channels), (n_sources, 1, (n_neighbors - n_paddings) * n_channels)
-            W_low, W_high = W_low.reshape(n_sources, n_blocks * n_neighbors, n_channels), W_high.reshape(n_sources, n_neighbors - n_paddings, n_channels)
+            
+            A_low, A_high = A_low.reshape(n_sources, n_blocks - n_remains, n_neighbors * n_channels, 1), A_high.reshape(n_sources, n_remains, (n_neighbors + 1) * n_channels, 1)
+            W_low, W_high = np.squeeze(GL_low @ A_low, axis=3), np.squeeze(GL_high @ A_high, axis=3) # (n_sources, n_blocks - n_remains, n_neighbors * n_channels), (n_sources, n_remains, (n_neighbors + 1) * n_channels)
+            W_low, W_high = W_low.reshape(n_sources, (n_blocks - n_remains) * n_neighbors, n_channels), W_high.reshape(n_sources, n_remains * (n_neighbors + 1), n_channels)
             W = np.concatenate([W_low, W_high], axis=1) # (n_sources, n_bins, n_channels)
             W = W.transpose(1, 0, 2)
             W_Hermite = W.conj() # (n_bins, n_sources, n_channels)
         else:
+            U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            R = _to_Hermite(R, axis1=3, axis2=4)
+
             X = X.reshape(n_channels, n_frames, n_blocks, n_neighbors)
             X = X.transpose(1, 2, 3, 0).reshape(n_frames, n_blocks, n_neighbors * n_channels)
 
@@ -510,12 +577,12 @@ class GaussIPSDTA(IPSDTAbase):
             XX = XX.transpose(0, 1, 2, 4, 3, 5) # (n_frames, n_blocks, n_neighbors, n_neighbors, n_channels, n_channels)
 
             inv_R = np.linalg.inv(R.conj() + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-            
+
             G = np.mean(XX * inv_R[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, n_blocks, n_neighbors, n_neighbors, n_channels, n_channels)
             G = G.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
             G = G.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
             G = _to_Hermite(G)
-
+            
             inv_G = np.linalg.inv(G) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
             inv_G_Hermite = inv_G.transpose(0, 1, 3, 2).conj() # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
             inv_G_Hermite = inv_G_Hermite.reshape(n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
@@ -539,8 +606,8 @@ class GaussIPSDTA(IPSDTAbase):
             GL = inv_G * Lambda[:, :, np.newaxis, np.newaxis, :, np.newaxis] # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
             GL = GL.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
 
-            Lambda = Lambda.reshape(n_sources, n_bins)
-
+            Lambda = Lambda.reshape(n_sources, n_blocks * n_neighbors)
+                        
             A = A.reshape(n_sources, n_blocks, n_neighbors * n_channels, 1)
             W = np.squeeze(GL @ A, axis=3) # (n_sources, n_blocks, n_neighbors * n_channels)
             W = W.reshape(n_sources, n_blocks * n_neighbors, n_channels)
@@ -550,58 +617,135 @@ class GaussIPSDTA(IPSDTAbase):
         self.demix_filter = W_Hermite
         self.fixed_point = Lambda
     
+    def update_spatial_model_vcd(self):
+        n_bins, n_frames = self.n_bins, self.n_frames
+        n_sources, n_channels = self.n_sources, self.n_channels
+        n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
+        n_remains = self.n_remains
+        eps = self.eps
+
+        X, W_Hermite = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
+        X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
+        Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
+
+        U, V = self.basis.transpose(0, 4, 1, 2, 3), self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
+        R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+        R = _to_Hermite(R, axis1=3, axis2=4)
+
+        if n_remains == 0:
+            W_Hermite = W_Hermite.reshape(n_blocks, n_neighbors, n_sources, n_channels)
+            X = X.reshape(n_blocks, n_neighbors, n_frames, n_channels)
+            XX = X[:, :, np.newaxis, :, :, np.newaxis] * X[:, np.newaxis, :, :, np.newaxis, :].conj() # (n_blocks, n_neighbors, n_neighbors', n_frames, n_channels, n_channels')
+            XX_diag = np.diagonal(XX, axis1=1, axis2=2).transpose(0, 4, 1, 2, 3) # (n_blocks, n_neighbors, n_frames, n_channels, n_channels')
+
+            inv_R = np.linalg.inv(R.conj() + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R_diag = np.diagonal(inv_R, axis1=3, axis2=4) # (n_sources, n_frames, n_blocks, n_neighbors)
+            inv_R_diag = inv_R_diag.transpose(0, 2, 3, 1) # (n_sources, n_blocks, n_neighbors, n_frames)
+
+            Q = np.mean(inv_R_diag[:, :, :, :, np.newaxis, np.newaxis] * XX_diag[np.newaxis, :, :, :, :, :], axis=3) # (n_sources, n_blocks, n_neighbors, n_channels, n_channels')
+            
+            inv_R = np.linalg.inv(R.conj() + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors')
+            inv_R = inv_R.transpose(0, 2, 3, 4, 1) # (n_sources, n_blocks, n_neighbors, n_neighbors', n_frames)
+
+            E = np.eye(n_sources, n_channels)
+            E = np.tile(E, reps=(n_blocks, n_neighbors, 1, 1)) # (n_blocks, n_neighbors, n_sources, n_channels)
+
+            for source_idx in range(n_sources):
+                W_n = W_Hermite[:, :, source_idx, :].conj() # (n_blocks, n_neighbors, n_channels)
+                Q_n = Q[source_idx, :, :, :, :] # (n_blocks, n_neighbors, n_channels, n_channels')
+
+                inv_R_n = inv_R[source_idx, :, :, :, :] # (n_blocks, n_neighbors, n_neighbors', n_frames)
+                XXw_n = XX @ W_n[:, np.newaxis, :, np.newaxis, :, np.newaxis] # (n_blocks, n_neighbors, n_neighbors', n_frames, n_channels, 1)
+                gamma = np.mean(XXw_n * inv_R_n[:, :, :, :, np.newaxis, np.newaxis], axis=(3, 5)) # (n_blocks, n_neighbors, n_neighbors', n_channels)
+                mask = 1 - np.eye(n_neighbors)
+                gamma = mask[np.newaxis, :, :, np.newaxis] * gamma # (n_blocks, n_neighbors, n_neighbors', n_channels)
+                gamma = gamma.sum(axis=2) # (n_blocks, n_neighbors, n_channels)
+
+                WQ_n = W_Hermite @ Q_n # (n_blocks, n_neighbors, n_channels, n_channels)
+                e_n = E[:, :, source_idx, :] # (n_blocks, n_neighbors, n_channels)
+
+                xi = np.linalg.solve(WQ_n, e_n) # (n_blocks, n_neighbors, n_channels)
+                xi_hat = np.linalg.solve(Q_n, gamma) # (n_blocks, n_neighbors, n_channels)
+
+                eta = np.squeeze(xi[:, :, np.newaxis, :].conj() @ Q_n @ xi[:, :, :, np.newaxis], axis=(2, 3)) # (n_blocks, n_neighbors)
+                eta_hat = np.squeeze(xi[:, :, np.newaxis, :].conj() @ Q_n @ xi_hat[:, :, :, np.newaxis], axis=(2, 3)) # (n_blocks, n_neighbors)
+                eta, eta_hat = eta.real, eta_hat.real
+
+                denominator = np.abs(eta_hat)**2
+                condition = denominator < eps
+                denominator[condition] = eps
+                eta_hat[condition] = eps
+                
+                coeff_if = 1 / np.sqrt(eta)
+                coeff = 0.5 * eta / eta_hat * (1 - np.sqrt(1 + 4 * eta / denominator))
+                coeff[condition] = coeff_if[condition]
+
+                w_n = coeff[:, :, np.newaxis] * xi - xi_hat
+                W_Hermite[:, :, source_idx, :] = w_n.conj()
+                # if condition number is too big, `denominator[denominator < eps] = eps` may diverge of cost function.
+            
+            W_Hermite = W_Hermite.reshape(n_bins, n_sources, n_channels)
+        else:
+            raise NotImplementedError
+
+        self.demix_filter = W_Hermite
+
     def compute_negative_loglikelihood(self):
-        if self.author.lower() == 'ikeshita':
-            loss = self.compute_negative_loglikelihood_ikeshita()
+        if self.author.lower() in __authors_ipsdta__:
+            loss = self.compute_negative_loglikelihood_block()
         else:
             raise ValueError("Not support {}'s IPSDTA.".format(self.author))
 
         return loss
 
-    def compute_negative_loglikelihood_ikeshita(self):
-        n_bins, n_frames = self.n_bins, self.n_frames
+    def compute_negative_loglikelihood_block(self):
+        n_frames = self.n_frames
         n_sources = self.n_sources
         n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
-        n_paddings = self.n_paddings
+        n_remains = self.n_remains
         eps = self.eps
 
         X, W_Hermite = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
-        
-        U, V = self.basis, self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
-        R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
         Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
+        U, V = self.basis, self.activation
 
-        if n_paddings > 0:
-            Y_low, Y_high = np.split(Y, [n_blocks * n_neighbors], axis=2) # (n_sources, n_frames, n_blocks * n_neighbors), (n_sources, n_frames, n_paddings)
-            R_low, R_high = np.split(R, [n_blocks], axis=2) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors, n_neighbors)
-            R_high = R_high[..., :-n_paddings, :-n_paddings] # (n_sources, n_frames, 1, n_paddings, n_paddings)
+        if n_remains > 0:
+            U_low, U_high = U
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
+            R_low = np.sum(U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
+            y_low, y_high = np.split(Y, [(n_blocks - n_remains)* n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
+            
             R_low, R_high = _to_Hermite(R_low, axis1=3, axis2=4), _to_Hermite(R_high, axis1=3, axis2=4)
-            Y_low = Y_low.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
-            Y_high = Y_high.reshape(n_sources, n_frames, 1, n_neighbors - n_paddings, 1) # (n_sources, n_frames, 1, n_neighbors - n_paddings, 1)
+            y_low = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
+            y_high = y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1, 1) # (n_sources, n_frames, 1, n_neighbors + 1, 1)
 
-            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors - n_paddings)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors), # (n_sources, n_frames, 1, n_neighbors - n_paddings, n_neighbors - n_paddings)
-            Ry_low = inv_R_low @ Y_low # (n_sources, n_frames, n_blocks - 1, n_neighbors, 1)
-            Ry_high = inv_R_high @ Y_high # (n_sources, n_frames, 1, n_neighbors - n_paddings, 1)
-            Ry_low = Ry_low.reshape(n_sources, n_frames, n_blocks * n_neighbors)
-            Ry_high = Ry_high.reshape(n_sources, n_frames, n_neighbors - n_paddings)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1s, n_neighbors + n_remains)
+            Ry_low = inv_R_low @ y_low # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
+            Ry_high = inv_R_high @ y_high # (n_sources, n_frames, n_remains, n_neighbors + 1, 1)
+            Ry_low = Ry_low.reshape(n_sources, n_frames, (n_blocks - n_remains) * n_neighbors)
+            Ry_high = Ry_high.reshape(n_sources, n_frames, n_remains * (n_neighbors + 1))
             Ry = np.concatenate([Ry_low, Ry_high], axis=2) # (n_sources, n_frames, n_bins)
 
-            det_low, det_high = np.linalg.det(R_low).real, np.linalg.det(R_high).real # (n_sources, n_frames, n_blocks), # (n_sources, n_frames, 1)
-            det = np.concatenate([det_low, det_high], axis=2) # (n_sources, n_frames, n_blocks + 1)
+            det_low, det_high = np.linalg.det(R_low).real, np.linalg.det(R_high).real # (n_sources, n_frames, n_blocks - n_remains), # (n_sources, n_frames, n_remains)
+            det = np.concatenate([det_low, det_high], axis=2) # (n_sources, n_frames, n_blocks)
         else:
+            U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            y = Y # (n_sources, n_frames, n_blocks * n_neighbors)
+
             R = _to_Hermite(R, axis1=3, axis2=4)
-            Y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
-            
+            y = y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
+
             inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-            Ry = inv_R @ Y # (n_sources, n_frames, n_blocks, n_neighbors, 1)
+            Ry = inv_R @ y # (n_sources, n_frames, n_blocks, n_neighbors, 1)
             Ry = Ry.reshape(n_sources, n_frames, n_blocks * n_neighbors)
 
             det = np.linalg.det(R).real # (n_sources, n_frames, n_blocks)
 
-            Y = Y.reshape(n_sources, n_frames, n_blocks * n_neighbors)
-
-        det[det < eps] = eps
+        # det[det < eps] = eps
         logdet = np.sum(np.log(det), axis=2) # (n_sources, n_frames)
 
         Y_Hermite = Y.conj()
