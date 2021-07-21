@@ -1,5 +1,7 @@
 import numpy as np
 
+from criterion.divergence import logdet_divergence
+
 """
 Positive Semidefinite Tensor Factorization
 """
@@ -7,8 +9,9 @@ Positive Semidefinite Tensor Factorization
 EPS = 1e-12
 
 class PSDTFbase:
-    def __init__(self, n_basis=2, eps=EPS):
+    def __init__(self, n_basis=2, normalize=True, eps=EPS):
         self.n_basis = n_basis
+        self.normalize = normalize
         self.loss = []
 
         self.eps = eps
@@ -32,16 +35,15 @@ class PSDTFbase:
         
         n_basis = self.n_basis
         n_bins, _, n_frames = self.target.shape
+        is_complex = isinstance(self.target.dtype, np.complex)
+
+        self.is_copmlex = is_complex
 
         if not hasattr(self, 'basis'):
-            if self.target.dtype in [np.complex, np.complex64, np.complex128, np.complex256]:
-                V = 0.5 * np.random.rand(n_bins, n_bins, n_basis) + 0.5j * np.random.rand(n_bins, n_bins, n_basis) # should be positive semi-definite
-                V = V.transpose(2, 1, 0).conj() @ V.transpose(2, 0, 1)
-                V = _to_Hermite(V, axis1=1, axis2=2)
-            else:
-                V = np.random.rand(n_bins, n_bins, n_basis) # should be positive semi-definite
-                V = V.transpose(2, 1, 0) @ V.transpose(2, 0, 1)
-                V = _to_symmetric(V, axis1=1, axis2=2)
+            V = np.random.rand(n_basis, n_bins) # should be positive semi-definite
+            eye = np.eye(n_bins, dtype=self.target.dtype)
+            eye = np.tile(eye, reps=(n_basis, 1, 1))
+            V = V[:, :, np.newaxis] * eye
             self.basis = V.transpose(1, 2, 0)
         else:
             self.basis = self.basis.copy()
@@ -50,6 +52,14 @@ class PSDTFbase:
             self.activation = np.random.rand(n_basis, n_frames)
         else:
             self.activation = self.activation.copy()
+        
+        if self.normalize:
+            V, H = self.basis, self.activation
+            trace = np.trace(V, axis1=0, axis2=1)
+            V = V / trace
+            H = H * trace[:, np.newaxis]
+
+            self.basis, self.activation = V, H
 
     def update(self, iteration=100):
         target = self.target
@@ -73,8 +83,8 @@ class LDPSDTF(PSDTFbase):
     Reference: "Beyond NMF: Time-Domain Audio Source Separation without Phase Reconstruction"
     See https://archives.ismir.net/ismir2013/paper/000032.pdf
     """
-    def __init__(self, n_basis=2, algorithm='mm', eps=EPS):
-        super().__init__(n_basis=n_basis, eps=eps)
+    def __init__(self, n_basis=2, algorithm='mm', normalize=True, eps=EPS):
+        super().__init__(n_basis=n_basis, normalize=normalize, eps=eps)
 
         self.algorithm = algorithm
         self.criterion = logdet_divergence
@@ -97,22 +107,22 @@ class LDPSDTF(PSDTFbase):
         X = X.transpose(2, 0, 1) # (n_frames, n_bins, n_bins)
         V = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
 
-        # Update basis
+        if self.is_complex:
+            raise NotImplementedError("Not support complex input.")
+        # Update activation
         Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
-        inv_Y = nonparallel_inv(Y, use_cholesky=True)
-        del Y
+        Y = _to_symmetric(Y)
+        inv_Y = np.linalg.inv(Y)
         inv_YV = inv_Y[np.newaxis, :, :, :] @ V[:, np.newaxis, :, :] # (n_basis, n_frames, n_bins, n_bins)
         inv_YX = inv_Y @ X # (n_frames, n_bins, n_bins)
         numerator = np.trace(inv_YV @ inv_YX[np.newaxis, :, :, :], axis1=-2, axis2=-1).real # (n_basis, n_frames)
         denominator = np.trace(inv_YV, axis1=-2, axis2=-1).real # (n_basis, n_frames)
-
-        del inv_YV, inv_YX
+        denominator[denominator < eps] = eps
         H = H * np.sqrt(numerator / denominator) # (n_basis, n_frames)
 
-        # Update activation
+        # Update basis
         Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
-        inv_Y = nonparallel_inv(Y, use_cholesky=True)
-        del Y
+        inv_Y = np.linalg.inv(Y)
 
         YXY = inv_Y @ X @ inv_Y # (n_frames, n_bins, n_bins)
         YXY = _to_symmetric(YXY)
@@ -120,12 +130,12 @@ class LDPSDTF(PSDTFbase):
         Q = np.sum(H[:, :, np.newaxis, np.newaxis] * YXY[np.newaxis, :, :, :], axis=1) # (n_basis, n_bins, n_bins)
         P, Q = _to_symmetric(P), _to_symmetric(Q)
 
-        L = np.linalg.cholesky(Q).real # (n_basis, n_bins, n_bins)
+        L = np.linalg.cholesky(Q + np.eye(n_bins)).real # (n_basis, n_bins, n_bins)
         LVPVL = L.transpose(0, 2, 1) @ V @ P @ V @ L # (n_basis, n_bins, n_bins)
 
         for m in range(len(LVPVL)):
-            LVPVL[m] = scipy.linalg.sqrtm(LVPVL[m])
-        LVPVL = np.linalg.inv(LVPVL)
+            LVPVL[m] = scipy.linalg.sqrtm(LVPVL[m]).real
+        LVPVL = np.linalg.inv(LVPVL + np.eye(n_bins))
 
         V = V @ L @ LVPVL @ L.transpose(0, 2, 1) @ V
         V = _to_symmetric(V)
