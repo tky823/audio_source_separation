@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.linalg
 
 from criterion.divergence import logdet_divergence
 
@@ -111,7 +112,7 @@ class LDPSDTF(PSDTFbase):
         # Update activation
         Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
         Y = _to_symmetric(Y)
-        inv_Y = np.linalg.inv(Y)
+        inv_Y = np.linalg.inv(Y + np.eye(n_bins))
         inv_YV = inv_Y[np.newaxis, :, :, :] @ V[:, np.newaxis, :, :] # (n_basis, n_frames, n_bins, n_bins)
         inv_YX = inv_Y @ X # (n_frames, n_bins, n_bins)
         numerator = np.trace(inv_YV @ inv_YX[np.newaxis, :, :, :], axis1=-2, axis2=-1).real # (n_basis, n_frames)
@@ -121,7 +122,7 @@ class LDPSDTF(PSDTFbase):
 
         # Update basis
         Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
-        inv_Y = np.linalg.inv(Y)
+        inv_Y = np.linalg.inv(Y + np.eye(n_bins))
 
         YXY = inv_Y @ X @ inv_Y # (n_frames, n_bins, n_bins)
         YXY = _to_symmetric(YXY)
@@ -140,7 +141,6 @@ class LDPSDTF(PSDTFbase):
         V = _to_symmetric(V)
 
         self.basis, self.activation = V.transpose(1, 2, 0), H
-
 
 def _to_symmetric(X, axis1=-2, axis2=-1):
     X = (X + X.swapaxes(axis1, axis2)) / 2
