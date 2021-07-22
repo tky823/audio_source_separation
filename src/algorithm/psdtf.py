@@ -8,6 +8,7 @@ Positive Semidefinite Tensor Factorization
 """
 
 EPS = 1e-12
+THRESHOLD = 1e+12
 
 class PSDTFbase:
     def __init__(self, n_basis=2, normalize=True, eps=EPS):
