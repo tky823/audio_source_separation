@@ -114,7 +114,7 @@ class LDPSDTF(PSDTFbase):
     def update_basis_mm(self):
         X = self.target # (n_bins, n_bins, n_frames)
         V, H = self.basis, self.activation # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
-        threshold = self.threshold
+        eps, threshold = self.eps, self.threshold
 
         X = X.transpose(2, 0, 1) # (n_frames, n_bins, n_bins)
         V_old = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
@@ -122,6 +122,7 @@ class LDPSDTF(PSDTFbase):
         Y = np.sum(V_old[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
         Y = _to_PSD(Y)
         inv_Y = np.linalg.inv(Y)
+        inv_Y = _to_PSD(inv_Y) #
 
         YXY = inv_Y @ X @ inv_Y # (n_frames, n_bins, n_bins)
         YXY = _to_PSD(YXY)
@@ -131,19 +132,18 @@ class LDPSDTF(PSDTFbase):
         
         if self.is_complex:
             L = np.linalg.cholesky(Q) # (n_basis, n_bins, n_bins)
-            LVPVL = L.transpose(0, 2, 1) @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)
-            LVPVL = _to_PSD(LVPVL)
-
-            for basis_idx in range(len(LVPVL)):
-                LVPVL[basis_idx] = scipy.linalg.sqrtm(LVPVL[basis_idx])
+            LVPVL = L.transpose(0, 2, 1).conj() @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)
         else:
             L = np.linalg.cholesky(Q).real # (n_basis, n_bins, n_bins)
             LVPVL = L.transpose(0, 2, 1) @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)
-            LVPVL = _to_PSD(LVPVL)
-
-            for basis_idx in range(len(LVPVL)):
-                LVPVL[basis_idx] = scipy.linalg.sqrtm(LVPVL[basis_idx]).real
         
+        LVPVL = _to_PSD(LVPVL)
+        
+        w, v = np.linalg.eigh(LVPVL)
+        w = np.sqrt(w)
+        w = w[..., np.newaxis] * np.eye(w.shape[-1])
+
+        LVPVL = v @ w @ np.linalg.inv(v)
         LVPVL = _to_PSD(LVPVL)
         condition = np.linalg.cond(LVPVL) < threshold
         LVPVL = np.linalg.inv(LVPVL)
@@ -165,6 +165,7 @@ class LDPSDTF(PSDTFbase):
         Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
         Y = _to_PSD(Y)
         inv_Y = np.linalg.inv(Y)
+        inv_Y = _to_PSD(inv_Y) #
         inv_YV = inv_Y[np.newaxis, :, :, :] @ V[:, np.newaxis, :, :] # (n_basis, n_frames, n_bins, n_bins)
         inv_YX = inv_Y @ X # (n_frames, n_bins, n_bins)
         numerator = np.trace(inv_YV @ inv_YX[np.newaxis, :, :, :], axis1=-2, axis2=-1).real # (n_basis, n_frames)
