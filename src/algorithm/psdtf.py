@@ -38,7 +38,7 @@ class PSDTFbase:
         n_basis = self.n_basis
         n_bins, _, n_frames = self.target.shape
 
-        self.is_complex = np.any(np.iscomplex(self.target))
+        self.is_complex = np.iscomplexobj(self.target)
 
         if not hasattr(self, 'basis'):
             V = np.random.rand(n_basis, n_bins) # should be positive semi-definite
