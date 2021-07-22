@@ -80,13 +80,21 @@ class IPSDTAbase:
             U = 0.5 * np.random.rand(n_sources, n_basis, n_bins, n_bins) + 0.5j * np.random.rand(n_sources, n_basis, n_bins, n_bins) # should be positive semi-definite
             U = U.swapaxes(-2, -1).conj() @ U
             U = to_Hermite(U, axis1=3, axis2=4)
-            self.basis = U.transpose(0, 2, 3, 1)
+            self.basis = U.transpose(0, 2, 3, 1) # (n_sources, n_bins, n_bins, n_basis)
         else:
             self.basis = self.basis.copy()
         if not hasattr(self, 'activation'):
             self.activation = np.random.rand(n_sources, n_basis, n_frames)
         else:
             self.activation = self.activation.copy()
+        
+        if self.normalize:
+            U, V = self.basis, self.activation # (n_sources, n_bins, n_bins, n_basis), (n_sources, n_basis, n_frames)
+            trace = np.trace(U, axis1=1, axis2=2).real # (n_sources, n_basis)
+            U = U / trace[:, np.newaxis, np.newaxis, :]
+            V = V * trace[:, :, np.newaxis]
+
+            self.basis, self.activation = U, V
     
     def __call__(self, input, iteration=100, **kwargs):
         """
@@ -280,7 +288,6 @@ class GaussIPSDTA(IPSDTAbase):
                 U = np.random.rand(n_sources, n_basis, n_blocks, n_neighbors)
                 U = U[:, :, :, :, np.newaxis] * eye
                 U = U.transpose(0, 2, 3, 4, 1)
-
             self.basis = U
         else:
             if n_remains > 0:
@@ -291,10 +298,29 @@ class GaussIPSDTA(IPSDTAbase):
                 U = self.basis
                 U = U.copy()
             self.basis = U
+        
         if not hasattr(self, 'activation'):
             self.activation = np.random.rand(n_sources, n_basis, n_frames)
         else:
             self.activation = self.activation.copy()
+
+        if self.normalize:
+            U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
+
+            if n_remains > 0:
+                U_low, U_high = U # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_basis), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_basis)
+                trace_low, trace_high = np.trace(U_low, axis1=2, axis2=3).real, np.trace(U_high, axis1=2, axis2=3).real # (n_sources, n_blocks - n_remains, n_basis), (n_sources, n_remains, n_basis)
+                trace = np.concatenate([trace_low, trace_high], axis=1) # (n_sources, n_blocks, n_basis)
+                trace = trace.sum(axis=1) # (n_sources, n_basis)
+                U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, :], U_high / trace[:, :, np.newaxis, np.newaxis, :]
+                V = V * trace[:, :, np.newaxis]
+            else:
+                trace = np.trace(U, axis1=2, axis2=3).real # (n_sources, n_blocks, n_basis)
+                trace = trace.sum(axis=1) # (n_sources, n_basis)
+                U = U / trace[:, :, np.newaxis, np.newaxis, :]
+                V = V * trace[:, :, np.newaxis]
+
+            self.basis, self.activation = U, V
     
         if self.algorithm_spatial == 'fixed-point':
             if not hasattr(self, 'fixed_point'):
@@ -321,6 +347,8 @@ class GaussIPSDTA(IPSDTAbase):
             self.update_spatial_model()
     
     def update_source_model(self):
+        n_remains = self.n_remains
+        
         if self.author.lower() == 'ikeshita':
             self.update_source_model_em()
         elif self.author.lower() == 'kondo':
@@ -328,6 +356,24 @@ class GaussIPSDTA(IPSDTAbase):
             # self.update_source_model_mm()
         else:
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
+        
+        if self.normalize:
+            U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
+
+            if n_remains > 0:
+                U_low, U_high = U # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_basis), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_basis)
+                trace_low, trace_high = np.trace(U_low, axis1=2, axis2=3).real, np.trace(U_high, axis1=2, axis2=3).real # (n_sources, n_blocks - n_remains, n_basis), (n_sources, n_remains, n_basis)
+                trace = np.concatenate([trace_low, trace_high], axis=1) # (n_sources, n_blocks, n_basis)
+                trace = trace.sum(axis=1) # (n_sources, n_basis)
+                U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, :], U_high / trace[:, :, np.newaxis, np.newaxis, :]
+                V = V * trace[:, :, np.newaxis]
+            else:
+                trace = np.trace(U, axis1=2, axis2=3).real # (n_sources, n_blocks, n_basis)
+                trace = trace.sum(axis=1) # (n_sources, n_basis)
+                U = U / trace[:, :, np.newaxis, np.newaxis, :]
+                V = V * trace[:, :, np.newaxis]
+
+            self.basis, self.activation = U, V
     
     def update_spatial_model(self):
         algorithm_spatial = self.algorithm_spatial
