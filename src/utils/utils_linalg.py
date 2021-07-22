@@ -1,6 +1,10 @@
 import numpy as np
 
-EPS = 1e+12
+EPS = 1e-12
+
+def to_Hermite(X, axis1=-2, axis2=-1):
+    X = (X + X.swapaxes(axis1, axis2).conj()) / 2
+    return X
 
 def to_PSD(X, axis1=-2, axis2=-1, eps=EPS):
     shape = X.shape
