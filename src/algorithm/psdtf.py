@@ -189,12 +189,13 @@ def _to_PSD(X, axis1=-2, axis2=-1, eps=EPS):
         X = (X + X.swapaxes(axis1, axis2).conj()) / 2
     else:
         X = (X + X.swapaxes(axis1, axis2)) / 2
+
     eigvals = np.linalg.eigvals(X)
-    delta = np.min(eigvals)
+    delta = np.min(eigvals, axis=-1)
     delta = np.minimum(delta, 0)
     trace = np.trace(X, axis1=axis1, axis2=axis2).real
 
-    X = X - delta * np.eye(shape[-1]) + eps * trace[:, np.newaxis, np.newaxis]
+    X = X - delta[..., np.newaxis, np.newaxis] * np.eye(shape[-1]) + eps * trace[..., np.newaxis, np.newaxis]
     
     return X
 
