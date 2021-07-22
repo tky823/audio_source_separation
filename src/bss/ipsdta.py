@@ -307,6 +307,7 @@ class GaussIPSDTA(IPSDTAbase):
         s += ", normalize={normalize}"
         if self.author.lower() == 'ikeshita':
             s += ", n_blocks={n_blocks}"
+        s += ", author={author}"
         s += ")"
 
         return s.format(**self.__dict__)
@@ -336,7 +337,6 @@ class GaussIPSDTA(IPSDTAbase):
             self.update_spatial_model_vcd()
         else:
             raise NotImplementedError("Not support {}-based spatial model updates.".format(algorithm_spatial))
-
     
     def update_source_model_em(self):
         self.update_basis_em()
