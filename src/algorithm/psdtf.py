@@ -50,7 +50,7 @@ class PSDTFbase:
             self.basis = self.basis.copy()
         
         if not hasattr(self, 'activation'):
-            self.activation = np.random.rand(n_basis, n_frames).astype(self.target.dtype)
+            self.activation = np.random.rand(n_basis, n_frames)
         else:
             self.activation = self.activation.copy()
         
@@ -194,7 +194,7 @@ def _to_PSD(X, axis1=-2, axis2=-1, eps=EPS):
     delta = np.min(eigvals)
     delta = np.minimum(delta, 0)
     trace = np.trace(X, axis1=axis1, axis2=axis2).real
-    
+
     X = X - delta * np.eye(shape[-1]) + eps * trace[:, np.newaxis, np.newaxis]
     
     return X
