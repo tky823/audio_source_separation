@@ -98,6 +98,14 @@ class LDPSDTF(PSDTFbase):
             # self.update_once_em()
         else:
             raise ValueError("Not support {} based update.".format(self.algorithm))
+        
+        if self.normalize:
+            V, H = self.basis, self.activation
+            trace = np.trace(V, axis1=0, axis2=1).real
+            V = V / trace
+            H = H * trace[:, np.newaxis]
+
+            self.basis, self.activation = V, H
     
     def update_once_mm(self):
         self.update_basis_mm()
