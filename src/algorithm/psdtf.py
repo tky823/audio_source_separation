@@ -1,5 +1,4 @@
 import numpy as np
-import scipy.linalg
 
 from utils.utils_linalg import to_PSD
 from criterion.divergence import logdet_divergence
@@ -74,7 +73,7 @@ class PSDTFbase:
             # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
             V, H = self.basis, self.activation
             VH = np.sum(V[:, :, :, np.newaxis] * H[np.newaxis, np.newaxis, :, :], axis=2) # (n_frames, n_bins, n_bins)
-            VH = _to_PSD(VH.transpose(2, 0, 1), eps=eps)
+            VH = to_PSD(VH.transpose(2, 0, 1), eps=eps)
 
             loss = self.criterion(VH, X)
             self.loss.append(loss.sum())
