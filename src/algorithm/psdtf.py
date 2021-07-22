@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.linalg
 
+from utils.utils_linalg import to_PSD
 from criterion.divergence import logdet_divergence
 
 """
@@ -65,13 +66,15 @@ class PSDTFbase:
     def update(self, iteration=100):
         X = self.target.transpose(2, 0, 1)
 
+        eps = self.eps
+
         for idx in range(iteration):
             self.update_once()
 
             # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
             V, H = self.basis, self.activation
             VH = np.sum(V[:, :, :, np.newaxis] * H[np.newaxis, np.newaxis, :, :], axis=2) # (n_frames, n_bins, n_bins)
-            VH = _to_PSD(VH.transpose(2, 0, 1))
+            VH = _to_PSD(VH.transpose(2, 0, 1), eps=eps)
 
             loss = self.criterion(VH, X)
             self.loss.append(loss.sum())
@@ -91,11 +94,10 @@ class LDPSDTF(PSDTFbase):
         self.criterion = logdet_divergence
     
     def update_once(self):
-        if self.algorithm == 'mm':
+        if self.algorithm == 'em':
+            self.update_once_em()
+        elif self.algorithm == 'mm':
             self.update_once_mm()
-        elif self.algorithm == 'em':
-            raise NotImplementedError
-            # self.update_once_em()
         else:
             raise ValueError("Not support {} based update.".format(self.algorithm))
         
@@ -106,7 +108,12 @@ class LDPSDTF(PSDTFbase):
             H = H * trace[:, np.newaxis]
 
             self.basis, self.activation = V, H
-    
+
+    def update_once_em(self):
+        raise NotImplementedError("Not support EM-based update.")
+        # self.update_basis_em()
+        # self.update_activation_em()    
+
     def update_once_mm(self):
         self.update_basis_mm()
         self.update_activation_mm()
@@ -120,37 +127,33 @@ class LDPSDTF(PSDTFbase):
         V_old = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
 
         Y = np.sum(V_old[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
-        Y = _to_PSD(Y)
+        Y = to_PSD(Y, eps=eps)
         inv_Y = np.linalg.inv(Y)
-        inv_Y = _to_PSD(inv_Y) #
+        inv_Y = to_PSD(inv_Y, eps=eps)
 
         YXY = inv_Y @ X @ inv_Y # (n_frames, n_bins, n_bins)
-        YXY = _to_PSD(YXY)
+        YXY = to_PSD(YXY, eps=eps)
         P = np.sum(H[:, :, np.newaxis, np.newaxis] * inv_Y[np.newaxis, :, :, :], axis=1) # (n_basis, n_bins, n_bins)
         Q = np.sum(H[:, :, np.newaxis, np.newaxis] * YXY[np.newaxis, :, :, :], axis=1) # (n_basis, n_bins, n_bins)
-        P, Q = _to_PSD(P), _to_PSD(Q)
+        P, Q = to_PSD(P, eps=eps), to_PSD(Q, eps=eps)
         
-        if self.is_complex:
-            L = np.linalg.cholesky(Q) # (n_basis, n_bins, n_bins)
-            LVPVL = L.transpose(0, 2, 1).conj() @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)
-        else:
-            L = np.linalg.cholesky(Q).real # (n_basis, n_bins, n_bins)
-            LVPVL = L.transpose(0, 2, 1) @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)
-        
-        LVPVL = _to_PSD(LVPVL)
+        L = np.linalg.cholesky(Q).real # (n_basis, n_bins, n_bins)
+        LVPVL = L.transpose(0, 2, 1) @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)        
+        LVPVL = to_PSD(LVPVL, eps=eps)
         
         w, v = np.linalg.eigh(LVPVL)
+        w[w < 0] = 0
         w = np.sqrt(w)
         w = w[..., np.newaxis] * np.eye(w.shape[-1])
 
         LVPVL = v @ w @ np.linalg.inv(v)
-        LVPVL = _to_PSD(LVPVL)
+        LVPVL = to_PSD(LVPVL, eps=eps)
         condition = np.linalg.cond(LVPVL) < threshold
         LVPVL = np.linalg.inv(LVPVL)
 
         V = V_old @ L @ LVPVL @ L.transpose(0, 2, 1) @ V_old
         V = np.where(condition[..., np.newaxis, np.newaxis], V, V_old)
-        V = _to_PSD(V)
+        V = to_PSD(V, eps=eps)
 
         self.basis, self.activation = V.transpose(1, 2, 0), H
 
@@ -163,9 +166,9 @@ class LDPSDTF(PSDTFbase):
         V = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
 
         Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
-        Y = _to_PSD(Y)
+        Y = to_PSD(Y, eps=eps)
         inv_Y = np.linalg.inv(Y)
-        inv_Y = _to_PSD(inv_Y) #
+        inv_Y = to_PSD(inv_Y, eps=eps)
         inv_YV = inv_Y[np.newaxis, :, :, :] @ V[:, np.newaxis, :, :] # (n_basis, n_frames, n_bins, n_bins)
         inv_YX = inv_Y @ X # (n_frames, n_bins, n_bins)
         numerator = np.trace(inv_YV @ inv_YX[np.newaxis, :, :, :], axis1=-2, axis2=-1).real # (n_basis, n_frames)
@@ -182,30 +185,6 @@ def _to_symmetric(X, axis1=-2, axis2=-1):
 
 def _to_Hermite(X, axis1=-2, axis2=-1):
     X = (X + X.swapaxes(axis1, axis2).conj()) / 2
-    return X
-
-def _to_PSD(X, axis1=-2, axis2=-1, eps=EPS):
-    shape = X.shape
-    n_dims = len(shape)
-    if axis1 < 0:
-        axis1 = n_dims + axis1
-    if axis2 < 0:
-        axis2 = n_dims + axis2
-    
-    assert axis1 == n_dims - 2 and axis2 == n_dims - 1, "`axis1` == -2 and `axis2` == -1"
-
-    if np.any(np.iscomplex(X)):
-        X = (X + X.swapaxes(axis1, axis2).conj()) / 2
-    else:
-        X = (X + X.swapaxes(axis1, axis2)) / 2
-
-    eigvals = np.linalg.eigvals(X)
-    delta = np.min(eigvals, axis=-1)
-    delta = np.minimum(delta, 0)
-    trace = np.trace(X, axis1=axis1, axis2=axis2).real
-
-    X = X - delta[..., np.newaxis, np.newaxis] * np.eye(shape[-1]) + eps * trace[..., np.newaxis, np.newaxis]
-    
     return X
 
 def nonparallel_inv(X, use_cholesky=True):
