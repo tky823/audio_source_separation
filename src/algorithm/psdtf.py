@@ -50,7 +50,7 @@ class PSDTFbase:
             self.basis = self.basis.copy()
         
         if not hasattr(self, 'activation'):
-            self.activation = np.random.rand(n_basis, n_frames)
+            self.activation = np.random.rand(n_basis, n_frames).astype(self.target.dtype)
         else:
             self.activation = self.activation.copy()
         
@@ -63,7 +63,7 @@ class PSDTFbase:
             self.basis, self.activation = V, H
 
     def update(self, iteration=100):
-        target = self.target
+        X = self.target.transpose(2, 0, 1)
 
         for idx in range(iteration):
             self.update_once()
@@ -71,10 +71,12 @@ class PSDTFbase:
             # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
             V, H = self.basis, self.activation
             VH = np.sum(V[:, :, :, np.newaxis] * H[np.newaxis, np.newaxis, :, :], axis=2) # (n_frames, n_bins, n_bins)
+            VH = VH.transpose(2, 0, 1)
+            VH = _to_PSD(VH)
 
-            loss = self.criterion(VH.transpose(2, 0, 1), target.transpose(2, 0, 1))
+            loss = self.criterion(VH, X)
             self.loss.append(loss.sum())
-        
+
     def update_once(self):
         raise NotImplementedError("Implement `update_once` method.")
 
@@ -99,46 +101,70 @@ class LDPSDTF(PSDTFbase):
             raise ValueError("Not support {} based update.".format(self.algorithm))
     
     def update_once_mm(self):
+        self.update_basis_mm()
+        self.update_activation_mm()
+
+    def update_basis_mm(self):
         X = self.target # (n_bins, n_bins, n_frames)
         V, H = self.basis, self.activation # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
-        n_bins, _, n_frames = X.shape
         eps = self.eps
 
         X = X.transpose(2, 0, 1) # (n_frames, n_bins, n_bins)
         V = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
 
-        if self.is_complex:
-            raise NotImplementedError("Not support complex input.")
-        # Update activation
         Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
-        Y = _to_symmetric(Y)
-        inv_Y = np.linalg.inv(Y + np.eye(n_bins))
+        Y = _to_PSD(Y)
+        inv_Y = np.linalg.inv(Y)
+
+        YXY = inv_Y @ X @ inv_Y # (n_frames, n_bins, n_bins)
+        YXY = _to_PSD(YXY)
+        P = np.sum(H[:, :, np.newaxis, np.newaxis] * inv_Y[np.newaxis, :, :, :], axis=1) # (n_basis, n_bins, n_bins)
+        Q = np.sum(H[:, :, np.newaxis, np.newaxis] * YXY[np.newaxis, :, :, :], axis=1) # (n_basis, n_bins, n_bins)
+        P, Q = _to_PSD(P), _to_PSD(Q)
+        
+        if self.is_complex:
+            L = np.linalg.cholesky(Q) # (n_basis, n_bins, n_bins)
+            LVPVL = L.transpose(0, 2, 1) @ V @ P @ V @ L # (n_basis, n_bins, n_bins)
+            LVPVL = _to_PSD(LVPVL)
+
+            for basis_idx in range(len(LVPVL)):
+                LVPVL[basis_idx] = scipy.linalg.sqrtm(LVPVL[basis_idx])
+
+            raise NotImplementedError("Not support complex input.")
+        else:
+            L = np.linalg.cholesky(Q).real # (n_basis, n_bins, n_bins)
+            LVPVL = L.transpose(0, 2, 1) @ V @ P @ V @ L # (n_basis, n_bins, n_bins)
+            LVPVL = _to_PSD(LVPVL)
+
+            for basis_idx in range(len(LVPVL)):
+                LVPVL[basis_idx] = scipy.linalg.sqrtm(LVPVL[basis_idx]).real
+        
+        LVPVL = _to_PSD(LVPVL)
+        LVPVL = np.linalg.inv(LVPVL)
+
+        V = V @ L @ LVPVL @ L.transpose(0, 2, 1) @ V
+        V = _to_PSD(V)
+
+        self.basis, self.activation = V.transpose(1, 2, 0), H
+    
+    def update_activation_mm(self):
+        X = self.target # (n_bins, n_bins, n_frames)
+        V, H = self.basis, self.activation # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
+        eps = self.eps
+
+        X = X.transpose(2, 0, 1) # (n_frames, n_bins, n_bins)
+        V = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
+
+        Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
+        Y = _to_PSD(Y)
+        inv_Y = np.linalg.inv(Y)
         inv_YV = inv_Y[np.newaxis, :, :, :] @ V[:, np.newaxis, :, :] # (n_basis, n_frames, n_bins, n_bins)
         inv_YX = inv_Y @ X # (n_frames, n_bins, n_bins)
         numerator = np.trace(inv_YV @ inv_YX[np.newaxis, :, :, :], axis1=-2, axis2=-1).real # (n_basis, n_frames)
         denominator = np.trace(inv_YV, axis1=-2, axis2=-1).real # (n_basis, n_frames)
+        numerator[numerator < 0] = 0
         denominator[denominator < eps] = eps
         H = H * np.sqrt(numerator / denominator) # (n_basis, n_frames)
-
-        # Update basis
-        Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
-        inv_Y = np.linalg.inv(Y + np.eye(n_bins))
-
-        YXY = inv_Y @ X @ inv_Y # (n_frames, n_bins, n_bins)
-        YXY = _to_symmetric(YXY)
-        P = np.sum(H[:, :, np.newaxis, np.newaxis] * inv_Y[np.newaxis, :, :, :], axis=1) # (n_basis, n_bins, n_bins)
-        Q = np.sum(H[:, :, np.newaxis, np.newaxis] * YXY[np.newaxis, :, :, :], axis=1) # (n_basis, n_bins, n_bins)
-        P, Q = _to_symmetric(P), _to_symmetric(Q)
-
-        L = np.linalg.cholesky(Q + np.eye(n_bins)).real # (n_basis, n_bins, n_bins)
-        LVPVL = L.transpose(0, 2, 1) @ V @ P @ V @ L # (n_basis, n_bins, n_bins)
-
-        for m in range(len(LVPVL)):
-            LVPVL[m] = scipy.linalg.sqrtm(LVPVL[m]).real
-        LVPVL = np.linalg.inv(LVPVL + np.eye(n_bins))
-
-        V = V @ L @ LVPVL @ L.transpose(0, 2, 1) @ V
-        V = _to_symmetric(V)
 
         self.basis, self.activation = V.transpose(1, 2, 0), H
 
@@ -148,6 +174,29 @@ def _to_symmetric(X, axis1=-2, axis2=-1):
 
 def _to_Hermite(X, axis1=-2, axis2=-1):
     X = (X + X.swapaxes(axis1, axis2).conj()) / 2
+    return X
+
+def _to_PSD(X, axis1=-2, axis2=-1, eps=EPS):
+    shape = X.shape
+    n_dims = len(shape)
+    if axis1 < 0:
+        axis1 = n_dims + axis1
+    if axis2 < 0:
+        axis2 = n_dims + axis2
+    
+    assert axis1 == n_dims - 2 and axis2 == n_dims - 1, "`axis1` == -2 and `axis2` == -1"
+
+    if np.any(np.iscomplex(X)):
+        X = (X + X.swapaxes(axis1, axis2).conj()) / 2
+    else:
+        X = (X + X.swapaxes(axis1, axis2)) / 2
+    eigvals = np.linalg.eigvals(X)
+    delta = np.min(eigvals)
+    delta = np.minimum(delta, 0)
+    trace = np.trace(X, axis1=axis1, axis2=axis2).real
+    
+    X = X - delta * np.eye(shape[-1]) + eps * trace[:, np.newaxis, np.newaxis]
+    
     return X
 
 def nonparallel_inv(X, use_cholesky=True):
