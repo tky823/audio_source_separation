@@ -128,8 +128,6 @@ class LDPSDTF(PSDTFbase):
 
             for basis_idx in range(len(LVPVL)):
                 LVPVL[basis_idx] = scipy.linalg.sqrtm(LVPVL[basis_idx])
-
-            raise NotImplementedError("Not support complex input.")
         else:
             L = np.linalg.cholesky(Q).real # (n_basis, n_bins, n_bins)
             LVPVL = L.transpose(0, 2, 1) @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)
