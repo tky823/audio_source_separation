@@ -11,12 +11,12 @@ EPS = 1e-12
 THRESHOLD = 1e+12
 
 class PSDTFbase:
-    def __init__(self, n_basis=2, normalize=True, eps=EPS):
+    def __init__(self, n_basis=2, normalize=True, eps=EPS, threshold=THRESHOLD):
         self.n_basis = n_basis
         self.normalize = normalize
         self.loss = []
 
-        self.eps = eps
+        self.eps, self.threshold = eps, threshold
 
     def __call__(self, target, iteration=100, **kwargs):
         self.target = target
@@ -37,9 +37,8 @@ class PSDTFbase:
         
         n_basis = self.n_basis
         n_bins, _, n_frames = self.target.shape
-        is_complex = isinstance(self.target.dtype, np.complex)
 
-        self.is_complex = is_complex
+        self.is_complex = np.any(np.iscomplex(self.target))
 
         if not hasattr(self, 'basis'):
             V = np.random.rand(n_basis, n_bins) # should be positive semi-definite
@@ -72,8 +71,7 @@ class PSDTFbase:
             # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
             V, H = self.basis, self.activation
             VH = np.sum(V[:, :, :, np.newaxis] * H[np.newaxis, np.newaxis, :, :], axis=2) # (n_frames, n_bins, n_bins)
-            VH = VH.transpose(2, 0, 1)
-            VH = _to_PSD(VH)
+            VH = _to_PSD(VH.transpose(2, 0, 1))
 
             loss = self.criterion(VH, X)
             self.loss.append(loss.sum())
@@ -86,12 +84,12 @@ class LDPSDTF(PSDTFbase):
     Reference: "Beyond NMF: Time-Domain Audio Source Separation without Phase Reconstruction"
     See https://archives.ismir.net/ismir2013/paper/000032.pdf
     """
-    def __init__(self, n_basis=2, algorithm='mm', normalize=True, eps=EPS):
-        super().__init__(n_basis=n_basis, normalize=normalize, eps=eps)
+    def __init__(self, n_basis=2, algorithm='mm', normalize=True, eps=EPS, threshold=THRESHOLD):
+        super().__init__(n_basis=n_basis, normalize=normalize, eps=eps, threshold=threshold)
 
         self.algorithm = algorithm
         self.criterion = logdet_divergence
-
+    
     def update_once(self):
         if self.algorithm == 'mm':
             self.update_once_mm()
@@ -108,12 +106,12 @@ class LDPSDTF(PSDTFbase):
     def update_basis_mm(self):
         X = self.target # (n_bins, n_bins, n_frames)
         V, H = self.basis, self.activation # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
-        eps = self.eps
+        threshold = self.threshold
 
         X = X.transpose(2, 0, 1) # (n_frames, n_bins, n_bins)
-        V = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
+        V_old = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
 
-        Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
+        Y = np.sum(V_old[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
         Y = _to_PSD(Y)
         inv_Y = np.linalg.inv(Y)
 
@@ -125,7 +123,7 @@ class LDPSDTF(PSDTFbase):
         
         if self.is_complex:
             L = np.linalg.cholesky(Q) # (n_basis, n_bins, n_bins)
-            LVPVL = L.transpose(0, 2, 1) @ V @ P @ V @ L # (n_basis, n_bins, n_bins)
+            LVPVL = L.transpose(0, 2, 1) @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)
             LVPVL = _to_PSD(LVPVL)
 
             for basis_idx in range(len(LVPVL)):
@@ -134,20 +132,22 @@ class LDPSDTF(PSDTFbase):
             raise NotImplementedError("Not support complex input.")
         else:
             L = np.linalg.cholesky(Q).real # (n_basis, n_bins, n_bins)
-            LVPVL = L.transpose(0, 2, 1) @ V @ P @ V @ L # (n_basis, n_bins, n_bins)
+            LVPVL = L.transpose(0, 2, 1) @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)
             LVPVL = _to_PSD(LVPVL)
 
             for basis_idx in range(len(LVPVL)):
                 LVPVL[basis_idx] = scipy.linalg.sqrtm(LVPVL[basis_idx]).real
         
         LVPVL = _to_PSD(LVPVL)
+        condition = np.linalg.cond(LVPVL) < threshold
         LVPVL = np.linalg.inv(LVPVL)
 
-        V = V @ L @ LVPVL @ L.transpose(0, 2, 1) @ V
+        V = V_old @ L @ LVPVL @ L.transpose(0, 2, 1) @ V_old
+        V = np.where(condition[..., np.newaxis, np.newaxis], V, V_old)
         V = _to_PSD(V)
 
         self.basis, self.activation = V.transpose(1, 2, 0), H
-    
+
     def update_activation_mm(self):
         X = self.target # (n_bins, n_bins, n_frames)
         V, H = self.basis, self.activation # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
