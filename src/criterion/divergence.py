@@ -82,6 +82,7 @@ def multichannel_is_divergence(input, target, eps=EPS):
 
 def logdet_divergence(input, target, eps=EPS):
     """
+    Multichannel Itakura-Saito divergence
     Args:
         input (*, n_channels, n_channels)
         target (*, n_channels, n_channels)
@@ -92,11 +93,12 @@ def logdet_divergence(input, target, eps=EPS):
     assert shape_input[-2] == shape_input[-1] and shape_target[-2] == shape_target[-1], "Invalid input shape"
     n_channels = shape_input[-1]
     
-    input, target = input + eps * np.eye(n_channels), target + eps * np.eye(n_channels)
     XY = target @ np.linalg.inv(input)
 
     trace = np.trace(XY, axis1=-2, axis2=-1).real
     eigvals_X, eigvals_Y = np.linalg.eigvalsh(target).real, np.linalg.eigvalsh(input).real
+    eigvals_X[eigvals_X < eps], eigvals_Y[eigvals_Y < eps] = eps, eps
+
     logdet = np.sum(np.log(eigvals_X), axis=1) - np.sum(np.log(eigvals_Y), axis=1)
 
     loss = trace - logdet - n_channels
