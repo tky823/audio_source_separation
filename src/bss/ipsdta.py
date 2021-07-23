@@ -162,10 +162,9 @@ class GaussIPSDTA(IPSDTAbase):
         """
         Args:
             n_basis <int>: Number of basis matrices
-            algorithm_spatial: 'fixed-point': fixed-point iteration, 'VCD': vector-wise coordinate descent
             callbacks <callable> or <list<callable>>:
-            reference_id <int>:
-            author <str>: 'Ikeshita'
+            reference_id <int>: Reference microphone index
+            author <str>: 'Ikeshita' or 'Kondo'
         """
         super().__init__(n_basis=n_basis, normalize=normalize, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
