@@ -8,15 +8,14 @@ Positive Semidefinite Tensor Factorization
 """
 
 EPS = 1e-12
-THRESHOLD = 1e+12
 
 class PSDTFbase:
-    def __init__(self, n_basis=2, normalize=True, eps=EPS, threshold=THRESHOLD):
+    def __init__(self, n_basis=2, normalize=True, eps=EPS):
         self.n_basis = n_basis
         self.normalize = normalize
         self.loss = []
 
-        self.eps, self.threshold = eps, threshold
+        self.eps = eps
 
     def __call__(self, target, iteration=100, **kwargs):
         self.target = target
@@ -86,8 +85,8 @@ class LDPSDTF(PSDTFbase):
     Reference: "Beyond NMF: Time-Domain Audio Source Separation without Phase Reconstruction"
     See https://archives.ismir.net/ismir2013/paper/000032.pdf
     """
-    def __init__(self, n_basis=2, algorithm='mm', normalize=True, eps=EPS, threshold=THRESHOLD):
-        super().__init__(n_basis=n_basis, normalize=normalize, eps=eps, threshold=threshold)
+    def __init__(self, n_basis=2, algorithm='mm', normalize=True, eps=EPS):
+        super().__init__(n_basis=n_basis, normalize=normalize, eps=eps)
 
         self.algorithm = algorithm
         self.criterion = logdet_divergence
@@ -116,15 +115,15 @@ class LDPSDTF(PSDTFbase):
     def update_basis_mm(self):
         X = self.target # (n_bins, n_bins, n_frames)
         V, H = self.basis, self.activation # V: (n_bins, n_bins, n_basis), H: (n_basis, n_frames)
-        eps, threshold = self.eps, self.threshold
+        eps = self.eps
 
         X = X.transpose(2, 0, 1) # (n_frames, n_bins, n_bins)
-        V_old = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
+        V = V.transpose(2, 0, 1) # (n_basis, n_bins, n_bins)
 
-        Y = np.sum(V_old[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
+        Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
         Y = to_PSD(Y, eps=eps)
         inv_Y = np.linalg.inv(Y)
-        inv_Y = to_PSD(inv_Y, eps=eps) #
+        inv_Y = to_PSD(inv_Y, eps=eps)
 
         YXY = inv_Y @ X @ inv_Y # (n_frames, n_bins, n_bins)
         YXY = to_PSD(YXY, eps=eps)
@@ -133,21 +132,18 @@ class LDPSDTF(PSDTFbase):
         P, Q = to_PSD(P, eps=eps), to_PSD(Q, eps=eps)
         
         L = np.linalg.cholesky(Q).real # (n_basis, n_bins, n_bins)
-        LVPVL = L.transpose(0, 2, 1) @ V_old @ P @ V_old @ L # (n_basis, n_bins, n_bins)        
+        LVPVL = L.transpose(0, 2, 1) @ V @ P @ V @ L # (n_basis, n_bins, n_bins)        
         LVPVL = to_PSD(LVPVL, eps=eps)
         
         w, v = np.linalg.eigh(LVPVL)
-        w[w < 0] = 0 # Add
+        w[w < 0] = 0
         w = np.sqrt(w)
         w = w[..., np.newaxis] * np.eye(w.shape[-1])
-
         LVPVL = v @ w @ np.linalg.inv(v)
         LVPVL = to_PSD(LVPVL, eps=eps)
-        condition = np.linalg.cond(LVPVL) < threshold
         LVPVL = np.linalg.inv(LVPVL)
 
-        V = V_old @ L @ LVPVL @ L.transpose(0, 2, 1) @ V_old
-        V = np.where(condition[..., np.newaxis, np.newaxis], V, V_old)
+        V = V @ L @ LVPVL @ L.transpose(0, 2, 1) @ V
         V = to_PSD(V, eps=eps)
 
         self.basis, self.activation = V.transpose(1, 2, 0), H
@@ -163,7 +159,7 @@ class LDPSDTF(PSDTFbase):
         Y = np.sum(V[:, np.newaxis, :, :] * H[:, :, np.newaxis, np.newaxis], axis=0) # (n_frames, n_bins, n_bins)
         Y = to_PSD(Y, eps=eps)
         inv_Y = np.linalg.inv(Y)
-        inv_Y = to_PSD(inv_Y, eps=eps) #
+        inv_Y = to_PSD(inv_Y, eps=eps)
         inv_YV = inv_Y[np.newaxis, :, :, :] @ V[:, np.newaxis, :, :] # (n_basis, n_frames, n_bins, n_bins)
         inv_YX = inv_Y @ X # (n_frames, n_bins, n_bins)
         numerator = np.trace(inv_YV @ inv_YX[np.newaxis, :, :, :], axis1=-2, axis2=-1).real # (n_basis, n_frames)
