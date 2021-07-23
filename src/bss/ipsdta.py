@@ -1,6 +1,6 @@
 import numpy as np
 
-from utils.utils_linalg import to_Hermite
+from utils.utils_linalg import to_PSD
 from algorithm.projection_back import projection_back
 
 EPS = 1e-12
@@ -79,7 +79,7 @@ class IPSDTAbase:
         if not hasattr(self, 'basis'):
             U = 0.5 * np.random.rand(n_sources, n_basis, n_bins, n_bins) + 0.5j * np.random.rand(n_sources, n_basis, n_bins, n_bins) # should be positive semi-definite
             U = U.swapaxes(-2, -1).conj() @ U
-            U = to_Hermite(U, axis1=3, axis2=4)
+            U = to_PSD(U, axis1=3, axis2=4)
             self.basis = U.transpose(0, 2, 3, 1) # (n_sources, n_bins, n_bins, n_basis)
         else:
             self.basis = self.basis.copy()
@@ -312,12 +312,12 @@ class GaussIPSDTA(IPSDTAbase):
                 trace_low, trace_high = np.trace(U_low, axis1=2, axis2=3).real, np.trace(U_high, axis1=2, axis2=3).real # (n_sources, n_blocks - n_remains, n_basis), (n_sources, n_remains, n_basis)
                 trace = np.concatenate([trace_low, trace_high], axis=1) # (n_sources, n_blocks, n_basis)
                 trace = trace.sum(axis=1) # (n_sources, n_basis)
-                U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, :], U_high / trace[:, :, np.newaxis, np.newaxis, :]
+                U_low, U_high = U_low / trace[:, np.newaxis, np.newaxis, np.newaxis, :], U_high / trace[:, np.newaxis, np.newaxis, np.newaxis, :]
                 V = V * trace[:, :, np.newaxis]
             else:
                 trace = np.trace(U, axis1=2, axis2=3).real # (n_sources, n_blocks, n_basis)
                 trace = trace.sum(axis=1) # (n_sources, n_basis)
-                U = U / trace[:, :, np.newaxis, np.newaxis, :]
+                U = U / trace[:, np.newaxis, np.newaxis, np.newaxis, :]
                 V = V * trace[:, :, np.newaxis]
 
             self.basis, self.activation = U, V
@@ -412,7 +412,7 @@ class GaussIPSDTA(IPSDTAbase):
             R_basis_low = U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_basis_high = U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low, R_high = np.sum(R_basis_low, axis=1), np.sum(R_basis_high, axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
-            R_low, R_high = to_Hermite(R_low, axis1=3, axis2=4), to_Hermite(R_high, axis1=3, axis2=4)
+            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4), to_PSD(R_high, axis1=3, axis2=4)
 
             inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             RR_low = R_basis_low @ inv_R_low[:, np.newaxis, :, :, :, :]
@@ -422,16 +422,16 @@ class GaussIPSDTA(IPSDTAbase):
 
             R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_hat_high = R_basis_high @ (np.eye(n_neighbors + 1) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
-            R_hat_low, R_hat_high = to_Hermite(R_hat_low), to_Hermite(R_hat_high)
+            R_hat_low, R_hat_high = to_PSD(R_hat_low), to_PSD(R_hat_high)
 
             Phi_low = y_hat_low * y_hat_low.swapaxes(-2, -1).conj() + R_hat_low
             Phi_high = y_hat_high * y_hat_high.swapaxes(-2, -1).conj() + R_hat_high
-            Phi_low, Phi_high = to_Hermite(Phi_low), to_Hermite(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
+            Phi_low, Phi_high = to_PSD(Phi_low), to_PSD(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
             
             V[V < eps] = eps
             U_low = np.mean(Phi_low[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors)
             U_high = np.mean(Phi_high[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
-            U_low, U_high = to_Hermite(U_low, axis1=3, axis2=4), to_Hermite(U_high, axis1=3, axis2=4)
+            U_low, U_high = to_PSD(U_low, axis1=3, axis2=4), to_PSD(U_high, axis1=3, axis2=4)
             U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
         else:
             U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
@@ -439,21 +439,21 @@ class GaussIPSDTA(IPSDTAbase):
 
             R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R = to_Hermite(R, axis1=3, axis2=4)
+            R = to_PSD(R, axis1=3, axis2=4)
 
             inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RR = R_basis @ inv_R[:, np.newaxis, :, :, :, :]
             y_hat = RR @ Y[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, 1)
 
             R_hat = R_basis @ (np.eye(n_neighbors) - RR.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R_hat = to_Hermite(R_hat)
+            R_hat = to_PSD(R_hat)
 
             Phi = y_hat * y_hat.swapaxes(-2, -1).conj() + R_hat
-            Phi = to_Hermite(Phi) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
+            Phi = to_PSD(Phi) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
 
             V[V < eps] = eps
             U = np.mean(Phi[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
-            U = to_Hermite(U, axis1=3, axis2=4)
+            U = to_PSD(U, axis1=3, axis2=4)
             U = U.transpose(0, 2, 3, 4, 1)
         
         self.basis, self.activation = U, V
@@ -481,7 +481,7 @@ class GaussIPSDTA(IPSDTAbase):
             R_basis_low = U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_basis_high = U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low, R_high = np.sum(R_basis_low, axis=1), np.sum(R_basis_high, axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
-            R_low, R_high = to_Hermite(R_low, axis1=3, axis2=4), to_Hermite(R_high, axis1=3, axis2=4)
+            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4), to_PSD(R_high, axis1=3, axis2=4)
 
             inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
             RR_low = R_basis_low @ inv_R_low[:, np.newaxis, :, :, :, :]
@@ -491,11 +491,11 @@ class GaussIPSDTA(IPSDTAbase):
 
             R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_hat_high = R_basis_high @ (np.eye(n_neighbors + 1) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
-            R_hat_low, R_hat_high = to_Hermite(R_hat_low), to_Hermite(R_hat_high)
+            R_hat_low, R_hat_high = to_PSD(R_hat_low), to_PSD(R_hat_high)
 
             Phi_low = y_hat_low * y_hat_low.swapaxes(-2, -1).conj() + R_hat_low
             Phi_high = y_hat_high * y_hat_high.swapaxes(-2, -1).conj() + R_hat_high
-            Phi_low, Phi_high = to_Hermite(Phi_low), to_Hermite(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            Phi_low, Phi_high = to_PSD(Phi_low), to_PSD(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             
             inv_U_low, inv_U_high = np.linalg.inv(U_low + eps * np.eye(n_neighbors)), np.linalg.inv(U_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
             UPhi_low, UPhi_high = inv_U_low[:, :, np.newaxis, :, :, :] @ Phi_low, inv_U_high[:, :, np.newaxis, :, :, :] @ Phi_high
@@ -510,17 +510,17 @@ class GaussIPSDTA(IPSDTAbase):
 
             R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R = to_Hermite(R, axis1=3, axis2=4)
+            R = to_PSD(R, axis1=3, axis2=4)
 
             inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RR = R_basis @ inv_R[:, np.newaxis, :, :, :, :]
             y_hat = RR @ Y[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, 1)
             
             R_hat = R_basis @ (np.eye(n_neighbors) - RR.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R_hat = to_Hermite(R_hat)
+            R_hat = to_PSD(R_hat)
 
             Phi = y_hat * y_hat.swapaxes(-2, -1).conj() + R_hat
-            Phi = to_Hermite(Phi) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            Phi = to_PSD(Phi) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
             
             inv_U = np.linalg.inv(U + eps * np.eye(n_neighbors)) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
             UPhi = inv_U[:, :, np.newaxis, :, :, :] @ Phi
@@ -554,7 +554,7 @@ class GaussIPSDTA(IPSDTAbase):
             U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low = np.sum(U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
-            R_low, R_high = to_Hermite(R_low, axis1=3, axis2=4), to_Hermite(R_high, axis1=3, axis2=4)
+            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4), to_PSD(R_high, axis1=3, axis2=4)
 
             X_low, X_high = np.split(X, [(n_blocks - n_remains) * n_neighbors], axis=2) # (n_channels, n_frames, (n_blocks - n_remains) * n_neighbors), (n_channels, n_frames, n_remains * (n_neighbors + 1))
             X_low, X_high = X_low.reshape(n_channels, n_frames, n_blocks - n_remains, n_neighbors), X_high.reshape(n_channels, n_frames, n_remains, n_neighbors + 1)
@@ -573,7 +573,7 @@ class GaussIPSDTA(IPSDTAbase):
             G_high = np.mean(XX_high * inv_R_high[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_channels, n_channels)
             G_low, G_high = G_low.transpose(0, 1, 2, 4, 3, 5), G_high.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks - n_remains, n_neighbors, n_channels, n_neighbors, n_channels), (n_sources, n_remains, n_neighbors + 1, n_channels, n_neighbors + 1, n_channels)
             G_low, G_high = G_low.reshape(n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), G_high.reshape(n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
-            G_low, G_high = to_Hermite(G_low), to_Hermite(G_high)
+            G_low, G_high = to_PSD(G_low), to_PSD(G_high)
             
             inv_G_low, inv_G_high = np.linalg.inv(G_low), np.linalg.inv(G_high) # (n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
             inv_G_low_Hermite, inv_G_high_Hermite = inv_G_low.transpose(0, 1, 3, 2).conj(), inv_G_high.transpose(0, 1, 3, 2).conj() # (n_sources, n_blocks - n_remains, n_neighbors * n_channels, n_neighbors * n_channels), (n_sources, n_remains, (n_neighbors + 1) * n_channels, (n_neighbors + 1) * n_channels)
@@ -613,7 +613,7 @@ class GaussIPSDTA(IPSDTAbase):
         else:
             U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R = to_Hermite(R, axis1=3, axis2=4)
+            R = to_PSD(R, axis1=3, axis2=4)
 
             X = X.reshape(n_channels, n_frames, n_blocks, n_neighbors)
             X = X.transpose(1, 2, 3, 0).reshape(n_frames, n_blocks, n_neighbors * n_channels)
@@ -628,7 +628,7 @@ class GaussIPSDTA(IPSDTAbase):
             G = np.mean(XX * inv_R[:, :, :, :, :, np.newaxis, np.newaxis], axis=1) # (n_sources, n_blocks, n_neighbors, n_neighbors, n_channels, n_channels)
             G = G.transpose(0, 1, 2, 4, 3, 5) # (n_sources, n_blocks, n_neighbors, n_channels, n_neighbors, n_channels)
             G = G.reshape(n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
-            G = to_Hermite(G)
+            G = to_PSD(G)
             
             inv_G = np.linalg.inv(G) # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
             inv_G_Hermite = inv_G.transpose(0, 1, 3, 2).conj() # (n_sources, n_blocks, n_neighbors * n_channels, n_neighbors * n_channels)
@@ -678,7 +678,7 @@ class GaussIPSDTA(IPSDTAbase):
 
         U, V = self.basis.transpose(0, 4, 1, 2, 3), self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
         R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-        R = to_Hermite(R, axis1=3, axis2=4)
+        R = to_PSD(R, axis1=3, axis2=4)
 
         if n_remains == 0:
             W_Hermite = W_Hermite.reshape(n_blocks, n_neighbors, n_sources, n_channels)
@@ -765,7 +765,7 @@ class GaussIPSDTA(IPSDTAbase):
             R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
             y_low, y_high = np.split(Y, [(n_blocks - n_remains)* n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
             
-            R_low, R_high = to_Hermite(R_low, axis1=3, axis2=4), to_Hermite(R_high, axis1=3, axis2=4)
+            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4), to_PSD(R_high, axis1=3, axis2=4)
             y_low = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
             y_high = y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1, 1) # (n_sources, n_frames, 1, n_neighbors + 1, 1)
 
@@ -783,7 +783,7 @@ class GaussIPSDTA(IPSDTAbase):
             R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             y = Y # (n_sources, n_frames, n_blocks * n_neighbors)
 
-            R = to_Hermite(R, axis1=3, axis2=4)
+            R = to_PSD(R, axis1=3, axis2=4)
             y = y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
 
             inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
