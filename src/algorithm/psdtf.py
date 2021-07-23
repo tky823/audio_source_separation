@@ -18,6 +18,11 @@ class PSDTFbase:
         self.eps = eps
 
     def __call__(self, target, iteration=100, **kwargs):
+        """
+        Args:
+            target <np.ndarry>: (n_bins, n_bins, n_frames)
+            iteration <int>: Default: 100
+        """
         self.target = target
 
         self._reset(**kwargs)
@@ -172,10 +177,6 @@ class LDPSDTF(PSDTFbase):
 
 def _to_symmetric(X, axis1=-2, axis2=-1):
     X = (X + X.swapaxes(axis1, axis2)) / 2
-    return X
-
-def _to_Hermite(X, axis1=-2, axis2=-1):
-    X = (X + X.swapaxes(axis1, axis2).conj()) / 2
     return X
 
 def nonparallel_inv(X, use_cholesky=True):
