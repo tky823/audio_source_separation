@@ -26,6 +26,6 @@ def to_PSD(X, axis1=-2, axis2=-1, eps=EPS):
     delta = np.minimum(delta, 0)
     trace = np.trace(X, axis1=axis1, axis2=axis2).real
 
-    X = X - delta[..., np.newaxis, np.newaxis] * np.eye(shape[-1]) + eps * trace[..., np.newaxis, np.newaxis]
+    X = X - delta[..., np.newaxis, np.newaxis] * np.eye(shape[-1]) + eps * trace[..., np.newaxis, np.newaxis] * np.eye(shape[-1])
     
     return X
