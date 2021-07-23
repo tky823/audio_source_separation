@@ -21,7 +21,7 @@ def to_PSD(X, axis1=-2, axis2=-1, eps=EPS):
     else:
         X = (X + X.swapaxes(axis1, axis2)) / 2
 
-    eigvals = np.linalg.eigvals(X)
+    eigvals = np.linalg.eigvals(X).real
     delta = np.min(eigvals, axis=-1)
     delta = np.minimum(delta, 0)
     trace = np.trace(X, axis1=axis1, axis2=axis2).real
