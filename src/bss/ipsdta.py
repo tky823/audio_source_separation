@@ -389,6 +389,10 @@ class GaussIPSDTA(IPSDTAbase):
         self.update_basis_em()
         self.update_activation_em()
     
+    def update_source_model_mm(self):
+        self.update_basis_mm()
+        self.update_activation_mm()
+
     def update_basis_em(self):
         n_frames = self.n_frames
         n_sources = self.n_sources
@@ -532,6 +536,72 @@ class GaussIPSDTA(IPSDTAbase):
         trace = np.sum(trace, axis=3) # (n_sources, n_basis, n_frames)
         V = trace / n_bins
         
+        self.basis, self.activation = U, V
+
+    def update_basis_mm(self):
+        pass
+    
+    def update_activation_mm(self):
+        n_sources = self.n_sources
+        n_frames = self.n_frames
+        n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
+        n_remains = self.n_remains
+        eps = self.eps
+
+        X, W_Hermite = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
+        Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
+
+        U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
+
+        if n_remains > 0:
+            U_low, U_high = U
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
+            R_low = np.sum(U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
+            y_low, y_high = np.split(Y, [(n_blocks - n_remains)* n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
+            y_low, y_high = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors), y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1)
+
+            R_low, R_high = to_PSD(R_low, eps=eps), to_PSD(R_high, eps=eps)
+            yy_low = y_low[:, :, :, :, np.newaxis] * y_low[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            yy_high = y_high[:, :, :, :, np.newaxis] * y_high[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors + 1) # (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            yy_low, yy_high = to_PSD(yy_low, eps=eps), to_PSD(yy_high, eps=eps)
+
+            inv_R_low, inv_R_high = np.linalg.inv(R_low), np.linalg.inv(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            Ryy_low, Ryy_high = inv_R_low @ yy_low, inv_R_high @ yy_high # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            RU_low = inv_R_low[:, np.newaxis, :, :, :, :] @ U_low[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
+            RU_high = inv_R_high[:, np.newaxis, :, :, :, :] @ U_high[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+
+            numerator_low = np.trace(RU_low @ Ryy_low[:, np.newaxis, :, :, :, :], axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_blocks - n_remains)
+            numerator_high = np.trace(RU_high @ Ryy_high[:, np.newaxis, :, :, :, :], axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_remains)
+            numerator = np.concatenate([numerator_low, numerator_high], axis=3) # (n_sources, n_basis, n_frames, n_blocks)
+            denominator_low = np.trace(RU_low, axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_blocks - n_remains)
+            denominator_high = np.trace(RU_high, axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_remains)
+            denominator = np.concatenate([denominator_low, denominator_high], axis=3) # (n_sources, n_basis, n_frames, n_blocks)
+
+            U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1) # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_basis), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_basis)
+        else:
+            U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors) # (n_sources, n_frames, n_blocks, n_neighbors)
+
+            R = to_PSD(R, eps=eps) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            yy = y[:, :, :, :, np.newaxis] * y[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            yy = to_PSD(yy, eps=eps)
+
+            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            Ryy = inv_R @ yy # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            RU = inv_R[:, np.newaxis, :, :, :, :] @ U[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
+            numerator = np.trace(RU @ Ryy[:, np.newaxis, :, :, :, :], axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_blocks)
+            denominator = np.trace(RU, axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_blocks)
+
+            U = U.transpose(0, 2, 3, 4, 1)
+        
+        numerator, denominator = np.sum(numerator, axis=3), np.sum(denominator, axis=3) # (n_sources, n_basis, n_frames), (n_sources, n_basis, n_frames)
+        numerator[numerator < 0] = 0
+        denominator[denominator < eps] = eps
+        V = V * np.sqrt(numerator / denominator) # (n_sources, n_basis, n_frames)
+
         self.basis, self.activation = U, V
 
     def update_spatial_model_fixed_point(self):
