@@ -418,9 +418,9 @@ class GaussIPSDTA(IPSDTAbase):
             R_basis_low = U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_basis_high = U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low, R_high = np.sum(R_basis_low, axis=1), np.sum(R_basis_high, axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
-            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4), to_PSD(R_high, axis1=3, axis2=4)
+            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4, eps=eps), to_PSD(R_high, axis1=3, axis2=4, eps=eps)
 
-            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low), np.linalg.inv(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             RR_low = R_basis_low @ inv_R_low[:, np.newaxis, :, :, :, :]
             RR_high = R_basis_high @ inv_R_high[:, np.newaxis, :, :, :, :]
             y_hat_low = RR_low @ Y_low[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, 1)
@@ -428,16 +428,16 @@ class GaussIPSDTA(IPSDTAbase):
 
             R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_hat_high = R_basis_high @ (np.eye(n_neighbors + 1) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
-            R_hat_low, R_hat_high = to_PSD(R_hat_low), to_PSD(R_hat_high)
+            R_hat_low, R_hat_high = to_PSD(R_hat_low, eps=eps), to_PSD(R_hat_high, eps=eps)
 
             Phi_low = y_hat_low * y_hat_low.swapaxes(-2, -1).conj() + R_hat_low
             Phi_high = y_hat_high * y_hat_high.swapaxes(-2, -1).conj() + R_hat_high
-            Phi_low, Phi_high = to_PSD(Phi_low), to_PSD(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            Phi_low, Phi_high = to_PSD(Phi_low, eps=eps), to_PSD(Phi_high, eps=eps) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             
             V[V < eps] = eps
             U_low = np.mean(Phi_low[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors)
             U_high = np.mean(Phi_high[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
-            U_low, U_high = to_PSD(U_low, axis1=3, axis2=4), to_PSD(U_high, axis1=3, axis2=4)
+            U_low, U_high = to_PSD(U_low, axis1=3, axis2=4, eps=eps), to_PSD(U_high, axis1=3, axis2=4, eps=eps)
             U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
         else:
             U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
@@ -445,25 +445,25 @@ class GaussIPSDTA(IPSDTAbase):
 
             R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R = to_PSD(R, axis1=3, axis2=4)
+            R = to_PSD(R, axis1=3, axis2=4, eps=eps)
 
-            inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RR = R_basis @ inv_R[:, np.newaxis, :, :, :, :]
             y_hat = RR @ Y[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, 1)
 
             R_hat = R_basis @ (np.eye(n_neighbors) - RR.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R_hat = to_PSD(R_hat)
+            R_hat = to_PSD(R_hat, eps=eps)
 
             Phi = y_hat * y_hat.swapaxes(-2, -1).conj() + R_hat
-            Phi = to_PSD(Phi) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
+            Phi = to_PSD(Phi, eps=eps) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
 
             V[V < eps] = eps
             U = np.mean(Phi[:, :, :, :, :, :] / V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=2) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
-            U = to_PSD(U, axis1=3, axis2=4)
+            U = to_PSD(U, axis1=3, axis2=4, eps=eps)
             U = U.transpose(0, 2, 3, 4, 1)
         
         self.basis, self.activation = U, V
-    
+
     def update_activation_em(self):
         n_bins, n_frames = self.n_bins, self.n_frames
         n_sources = self.n_sources
@@ -487,9 +487,9 @@ class GaussIPSDTA(IPSDTAbase):
             R_basis_low = U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_basis_high = U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low, R_high = np.sum(R_basis_low, axis=1), np.sum(R_basis_high, axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
-            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4), to_PSD(R_high, axis1=3, axis2=4)
+            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4, eps=eps), to_PSD(R_high, axis1=3, axis2=4, eps=eps)
 
-            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low), np.linalg.inv(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
             RR_low = R_basis_low @ inv_R_low[:, np.newaxis, :, :, :, :]
             RR_high = R_basis_high @ inv_R_high[:, np.newaxis, :, :, :, :]
             y_hat_low = RR_low @ Y_low[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, 1)
@@ -497,13 +497,13 @@ class GaussIPSDTA(IPSDTAbase):
 
             R_hat_low = R_basis_low @ (np.eye(n_neighbors) - RR_low.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_hat_high = R_basis_high @ (np.eye(n_neighbors + 1) - RR_high.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
-            R_hat_low, R_hat_high = to_PSD(R_hat_low), to_PSD(R_hat_high)
+            R_hat_low, R_hat_high = to_PSD(R_hat_low, eps=eps), to_PSD(R_hat_high, eps=eps)
 
             Phi_low = y_hat_low * y_hat_low.swapaxes(-2, -1).conj() + R_hat_low
             Phi_high = y_hat_high * y_hat_high.swapaxes(-2, -1).conj() + R_hat_high
-            Phi_low, Phi_high = to_PSD(Phi_low), to_PSD(Phi_high) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            Phi_low, Phi_high = to_PSD(Phi_low, eps=eps), to_PSD(Phi_high, eps=eps) # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             
-            inv_U_low, inv_U_high = np.linalg.inv(U_low + eps * np.eye(n_neighbors)), np.linalg.inv(U_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
+            inv_U_low, inv_U_high = np.linalg.inv(U_low), np.linalg.inv(U_high) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
             UPhi_low, UPhi_high = inv_U_low[:, :, np.newaxis, :, :, :] @ Phi_low, inv_U_high[:, :, np.newaxis, :, :, :] @ Phi_high
             trace_low = np.trace(UPhi_low, axis1=-2, axis2=-1).real
             trace_high = np.trace(UPhi_high, axis1=-2, axis2=-1).real
@@ -516,19 +516,19 @@ class GaussIPSDTA(IPSDTAbase):
 
             R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R = to_PSD(R, axis1=3, axis2=4)
+            R = to_PSD(R, axis1=3, axis2=4, eps=eps)
 
-            inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RR = R_basis @ inv_R[:, np.newaxis, :, :, :, :]
             y_hat = RR @ Y[:, np.newaxis, :, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, 1)
             
             R_hat = R_basis @ (np.eye(n_neighbors) - RR.swapaxes(-2, -1).conj()) # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
-            R_hat = to_PSD(R_hat)
+            R_hat = to_PSD(R_hat, eps=eps)
 
             Phi = y_hat * y_hat.swapaxes(-2, -1).conj() + R_hat
-            Phi = to_PSD(Phi) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            Phi = to_PSD(Phi, eps=eps) # (n_sources, n_basis, n_frames, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames, 1, n_neighbors + n_remains, n_neighbors + n_remains)
             
-            inv_U = np.linalg.inv(U + eps * np.eye(n_neighbors)) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            inv_U = np.linalg.inv(U) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
             UPhi = inv_U[:, :, np.newaxis, :, :, :] @ Phi
             trace = np.trace(UPhi, axis1=-2, axis2=-1).real
 
@@ -987,14 +987,31 @@ class GaussIPSDTA(IPSDTAbase):
 
 class tIPSDTA(IPSDTAbase):
     """
+        Independent Positive Semi-Definite Tensor Analysis Based on Student's t distribution
+        Reference: "Convergence-Guaranteed Independent Positive Semidefinite Tensor Analysis Based on Student's T Distribution"
+        See https://ieeexplore.ieee.org/document/9054150
     """
-    def __init__(self, n_basis=10, callbacks=None, reference_id=0, author='Kondo', recordable_loss=True, eps=EPS, **kwargs):
+    def __init__(self, n_basis=10, nu=1, spatial_iteration=None, normalize=True, callbacks=None, reference_id=0, author='Kondo', recordable_loss=True, eps=EPS, **kwargs):
         """
         Args:
+            nu <float>: Degree of freedom
         """
-        super().__init__(n_basis=n_basis, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, normalize=normalize, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
+        self.nu = nu
+        self.spatial_iteration = spatial_iteration
         self.author = author
+
+        if author.lower() in __authors_ipsdta__:
+            if author.lower() == 'kondo':
+                if set(kwargs) - set(__kwargs_kondo_ipsdta__) != set():
+                    raise ValueError("Invalid keywords.")
+                for key in __kwargs_kondo_ipsdta__.keys():
+                    setattr(self, key, __kwargs_kondo_ipsdta__[key])
+            for key in kwargs.keys():
+                setattr(self, key, kwargs[key])
+        else:
+            raise ValueError("Not support {}'s IPSDTA".format(author))
 
         raise NotImplementedError("In progress...")
 
