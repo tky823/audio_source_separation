@@ -5,11 +5,6 @@ from algorithm.projection_back import projection_back
 
 EPS = 1e-12
 
-__algorithms_spatial__ = [
-    'fixed-point',
-    'VCD'
-]
-
 __authors_ipsdta__ = [
     'ikeshita', 'kondo'
 ]
@@ -28,7 +23,7 @@ class IPSDTAbase:
     """
     Independent Positive Semi-Definite Tensor Analysis
     """
-    def __init__(self, n_basis=10, normalize=True, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, recordable_loss=True, eps=EPS):
+    def __init__(self, n_basis=10, normalize=True, callbacks=None, reference_id=0, recordable_loss=True, eps=EPS):
         if callbacks is not None:
             if callable(callbacks):
                 callbacks = [callbacks]
@@ -40,9 +35,6 @@ class IPSDTAbase:
         
         self.n_basis = n_basis
         self.normalize = normalize
-
-        assert algorithm_spatial in __algorithms_spatial__, "Choose from {} as `algorithm_spatial`.".format(__algorithms_spatial__)
-        self.algorithm_spatial = algorithm_spatial
 
         self.input = None
         self.recordable_loss = recordable_loss
@@ -166,7 +158,7 @@ class GaussIPSDTA(IPSDTAbase):
         Reference: "Independent Positive Semidefinite Tensor Analysisin Blind Source Separation"
         See https://ieeexplore.ieee.org/document/8553546
     """
-    def __init__(self, n_basis=10, spatial_iteration=None, normalize=True, algorithm_spatial='fixed-point', callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
+    def __init__(self, n_basis=10, spatial_iteration=None, normalize=True, callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
         """
         Args:
             n_basis <int>: Number of basis matrices
@@ -175,7 +167,7 @@ class GaussIPSDTA(IPSDTAbase):
             reference_id <int>:
             author <str>: 'Ikeshita'
         """
-        super().__init__(n_basis=n_basis, normalize=normalize, algorithm_spatial=algorithm_spatial, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
+        super().__init__(n_basis=n_basis, normalize=normalize, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
         self.spatial_iteration = spatial_iteration
         self.author = author
@@ -321,12 +313,19 @@ class GaussIPSDTA(IPSDTAbase):
                 V = V * trace[:, :, np.newaxis]
 
             self.basis, self.activation = U, V
-    
-        if self.algorithm_spatial == 'fixed-point':
+
+        if self.author.lower() == 'ikeshita':
+            self.algorithm_spatial = 'fixed-point'
+
             if not hasattr(self, 'fixed_point'):
                 self.fixed_point = np.ones((n_sources, n_bins), dtype=np.complex128)
             else:
                 self.fixed_point = self.fixed_point.copy()
+        
+        elif self.author.lower() == 'kondo':
+            self.algorithm_spatial = 'VCD'
+        else:
+            raise ValueError("Not support {}'s IPSDTA.".format(self.author))
 
     def __repr__(self):
         s = "Gauss-IPSDTA("
@@ -542,7 +541,59 @@ class GaussIPSDTA(IPSDTAbase):
         self.basis, self.activation = U, V
 
     def update_basis_mm(self):
-        pass
+        n_sources = self.n_sources
+        n_frames = self.n_frames
+        n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
+        n_remains = self.n_remains
+        eps = self.eps
+
+        X, W_Hermite = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
+        Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
+
+        U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
+
+        if n_remains > 0:
+            raise NotImplementedError
+        else:
+            U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1)
+
+            R_basis = U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
+            R = np.sum(R_basis, axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            R = to_PSD(R, axis1=3, axis2=4, eps=eps)
+            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = to_PSD(inv_R, axis1=3, axis2=4, eps=eps)
+
+            yy = y @ y.transpose(0, 1, 2, 4, 3).conj() + eps * np.eye(n_neighbors)
+            RyyR = inv_R @ yy @ inv_R # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            S = np.sum(V[:, :, :, np.newaxis, np.newaxis, np.newaxis] * RyyR[:, np.newaxis, :, :, :, :], axis=2) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            T = np.sum(V[:, :, :, np.newaxis, np.newaxis, np.newaxis] * inv_R[:, np.newaxis, :, :, :, :], axis=2) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+
+            # compute S^(1/2)
+            eigval, eigvec = np.linalg.eigh(S)
+            eigval[eigval < 0] = 0
+            eigval = np.sqrt(eigval)
+            eigval = eigval[..., np.newaxis] * np.eye(n_neighbors)
+            sqrt_S = eigvec @ eigval @ np.linalg.inv(eigvec)
+            sqrt_S = to_PSD(sqrt_S, eps=eps)
+
+            # compute (S^(1/2)TUTS^(1/2))^(-1/2)
+            STUTS = sqrt_S @ U @ T @ U @ sqrt_S
+            STUTS = to_PSD(STUTS, eps=eps)
+            eigval, eigvec = np.linalg.eigh(STUTS)
+            eigval[eigval < 0] = 0
+            eigval = np.sqrt(eigval)
+            eigval = eigval[..., np.newaxis] * np.eye(n_neighbors)
+            sqrt_STUTS = eigvec @ eigval @ np.linalg.inv(eigvec)
+            sqrt_STUTS = to_PSD(sqrt_STUTS, eps=eps)
+            inv_STUTS = np.linalg.inv(sqrt_STUTS)
+            inv_STUTS = to_PSD(inv_STUTS, eps=eps)
+            U = U @ sqrt_S @ inv_STUTS @ sqrt_S @ U
+            U = to_PSD(U, eps=eps)
+            U = U.transpose(0, 2, 3, 4, 1)
+        
+        self.basis, self.activation = U, V
     
     def update_activation_mm(self):
         n_sources = self.n_sources
