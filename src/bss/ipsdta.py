@@ -347,34 +347,37 @@ class GaussIPSDTA(IPSDTAbase):
             self.update_spatial_model()
     
     def update_source_model(self):
-        n_remains = self.n_remains
-        
         if self.author.lower() == 'ikeshita':
             self.update_source_model_em()
         elif self.author.lower() == 'kondo':
-            self.update_source_model_em()
-            # self.update_source_model_mm()
+            self.update_source_model_mm()
         else:
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
         
         if self.normalize:
+            n_remains = self.n_remains
+
             U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
 
             if n_remains > 0:
-                U_low, U_high = U # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_basis), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_basis)
-                trace_low, trace_high = np.trace(U_low, axis1=2, axis2=3).real, np.trace(U_high, axis1=2, axis2=3).real # (n_sources, n_blocks - n_remains, n_basis), (n_sources, n_remains, n_basis)
-                trace = np.concatenate([trace_low, trace_high], axis=1) # (n_sources, n_blocks, n_basis)
-                trace = trace.sum(axis=1) # (n_sources, n_basis)
-                U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, :], U_high / trace[:, :, np.newaxis, np.newaxis, :]
+                U_low, U_high = U
+                U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+                trace_low, trace_high = np.trace(U_low, axis1=3, axis2=4).real, np.trace(U_high, axis1=3, axis2=4).real
+                trace = np.concatenate([trace_low, trace_high], axis=2) # (n_sources, n_basis, n_blocks)
+                trace = trace.sum(axis=2) # (n_sources, n_basis)
+                U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, np.newaxis], U_high / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
+                U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
                 V = V * trace[:, :, np.newaxis]
             else:
-                trace = np.trace(U, axis1=2, axis2=3).real # (n_sources, n_blocks, n_basis)
-                trace = trace.sum(axis=1) # (n_sources, n_basis)
-                U = U / trace[:, :, np.newaxis, np.newaxis, :]
+                U = U.transpose(0, 4, 1, 2, 3)
+                trace = np.trace(U, axis1=3, axis2=4).real
+                trace = trace.sum(axis=2) # (n_sources, n_basis)
+                U = U / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
+                U = U.transpose(0, 2, 3, 4, 1)
                 V = V * trace[:, :, np.newaxis]
-
-            self.basis, self.activation = U, V
     
+            self.basis, self.activation = U, V
+     
     def update_spatial_model(self):
         algorithm_spatial = self.algorithm_spatial
 
