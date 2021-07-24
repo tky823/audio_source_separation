@@ -1020,15 +1020,19 @@ class GaussIPSDTA(IPSDTAbase):
             y_low = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
             y_high = y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1, 1) # (n_sources, n_frames, 1, n_neighbors + 1, 1)
 
-            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1s, n_neighbors + n_remains)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low), np.linalg.inv(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1s, n_neighbors + n_remains)
+            inv_R_low, inv_R_high = to_PSD(inv_R_low, eps=eps), to_PSD(inv_R_high, eps=eps)
             Ry_low = inv_R_low @ y_low # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
             Ry_high = inv_R_high @ y_high # (n_sources, n_frames, n_remains, n_neighbors + 1, 1)
             Ry_low = Ry_low.reshape(n_sources, n_frames, (n_blocks - n_remains) * n_neighbors)
             Ry_high = Ry_high.reshape(n_sources, n_frames, n_remains * (n_neighbors + 1))
             Ry = np.concatenate([Ry_low, Ry_high], axis=2) # (n_sources, n_frames, n_bins)
 
-            det_low, det_high = np.linalg.det(R_low).real, np.linalg.det(R_high).real # (n_sources, n_frames, n_blocks - n_remains), # (n_sources, n_frames, n_remains)
-            det = np.concatenate([det_low, det_high], axis=2) # (n_sources, n_frames, n_blocks)
+            eigvals_low, eigvals_high = np.linalg.eigvalsh(R_low), np.linalg.eigvalsh(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1)
+            eigvals_low[eigvals_low < eps], eigvals_high[eigvals_high < eps] = eps, eps
+            logdet_low, logdet_high = np.log(eigvals_low), np.log(eigvals_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1)
+            logdet_low, logdet_high = logdet_low.sum(axis=3), logdet_high.sum(axis=3) # (n_sources, n_frames, n_blocks - n_remains), (n_sources, n_frames, n_remains)
+            logdet_R = np.concatenate([logdet_low, logdet_high], axis=2)# (n_sources, n_frames, n_blocks)
         else:
             U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
@@ -1037,18 +1041,27 @@ class GaussIPSDTA(IPSDTAbase):
             R = to_PSD(R, axis1=3, axis2=4)
             y = y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
 
-            inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = to_PSD(inv_R, eps=eps)
             Ry = inv_R @ y # (n_sources, n_frames, n_blocks, n_neighbors, 1)
             Ry = Ry.reshape(n_sources, n_frames, n_blocks * n_neighbors)
 
-            det = np.linalg.det(R).real # (n_sources, n_frames, n_blocks)
+            eigvals = np.linalg.eigvalsh(R) # (n_sources, n_frames, n_blocks, n_neighbors)
+            eigvals[eigvals < eps] = eps
+            logdet_R = np.log(eigvals) # (n_sources, n_frames, n_blocks, n_neighbors)
+            logdet_R = logdet_R.sum(axis=3) # (n_sources, n_frames, n_blocks)
+        
+        logdet_R = logdet_R.sum(axis=2) # (n_sources, n_frames)
+        
+        eigvals = np.linalg.eigvals(W_Hermite) # (n_bins, n_sources)
+        eigvals = np.abs(eigvals)
+        eigvals[eigvals < eps] = eps
+        logdet_W = np.log(eigvals)
+        logdet_W = logdet_W.sum(axis=1) # (n_bins,)
 
-        # det[det < eps] = eps
-        logdet = np.sum(np.log(det), axis=2) # (n_sources, n_frames)
-
-        Y_Hermite = Y.conj()
-        yRy = np.sum(Y_Hermite * Ry, axis=2).real # (n_sources, n_frames)
-        loss = np.sum(yRy + logdet) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W_Hermite))))
+        y_Hermite = Y.conj()
+        yRy = np.sum(y_Hermite * Ry, axis=2).real # (n_sources, n_frames)
+        loss = np.sum(yRy + logdet_R) - 2 * n_frames * logdet_W.sum()
 
         return loss
 
