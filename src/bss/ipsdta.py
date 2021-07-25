@@ -191,7 +191,7 @@ class GaussIPSDTA(IPSDTAbase):
                 for key in __kwargs_kondo_ipsdta__.keys():
                     setattr(self, key, __kwargs_kondo_ipsdta__[key])
                 self.algorithm_source = 'mm'
-                self.algorithm_spatial = 'VCD'
+                self.algorithm_spatial = 'vcd'
             for key in kwargs.keys():
                 setattr(self, key, kwargs[key])
         else:
@@ -388,7 +388,7 @@ class GaussIPSDTA(IPSDTAbase):
 
         if algorithm_spatial == 'fixed-point':
             self.update_spatial_model_fixed_point()
-        elif algorithm_spatial == 'VCD':
+        elif algorithm_spatial == 'vcd':
             self.update_spatial_model_vcd()
         else:
             raise NotImplementedError("Not support {}-based spatial model updates.".format(algorithm_spatial))
