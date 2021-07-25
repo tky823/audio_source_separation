@@ -4,7 +4,6 @@ from utils.utils_linalg import to_PSD
 from algorithm.projection_back import projection_back
 
 EPS = 1e-12
-THRESHOLD = 1e+12
 
 __authors_ipsdta__ = [
     'ikeshita', 'kondo'
@@ -17,8 +16,7 @@ __kwargs_ikeshita_ipsdta__ = {
 
 __kwargs_kondo_ipsdta__ = {
     'n_blocks': 1024,
-    'spatial_iteration': 10,
-    'threshold': THRESHOLD
+    'spatial_iteration': 10
 }
 
 class IPSDTAbase:
@@ -164,7 +162,7 @@ class GaussIPSDTA(IPSDTAbase):
             https://ieeexplore.ieee.org/document/8553546
             https://ieeexplore.ieee.org/document/9054150
     """
-    def __init__(self, n_basis=10, spatial_iteration=None, normalize=True, callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, threshold=THRESHOLD, **kwargs):
+    def __init__(self, n_basis=10, spatial_iteration=None, normalize=True, callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
         """
         Args:
             n_basis <int>: Number of basis matrices
@@ -853,13 +851,13 @@ class GaussIPSDTA(IPSDTAbase):
 
         self.demix_filter = W_Hermite
         self.fixed_point = Lambda
-    
+
     def update_spatial_model_vcd(self):
         n_bins, n_frames = self.n_bins, self.n_frames
         n_sources, n_channels = self.n_sources, self.n_channels
         n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
         n_remains = self.n_remains
-        eps, threshold = self.eps, self.threshold
+        eps = self.eps
 
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W) # (n_sources, n_bins, n_frames)
@@ -901,8 +899,7 @@ class GaussIPSDTA(IPSDTAbase):
                 inv_R_ii_n_low, inv_R_ii_n_high = inv_R_ii_n_low.transpose(0, 2, 1), inv_R_ii_n_high.transpose(0, 2, 1) # (n_blocks - n_remains, n_neighbors, n_frames), (n_remains, n_neighbors + 1, n_frames)
                 
                 for neighbor_idx in range(n_neighbors):
-                    w_n_low, w_n_high = W_low[:, :, source_idx, :].conj(), W_high[:, :, source_idx, :].conj() # (n_blocks - n_remains, n_neighbors', n_channels), (n_remains, n_neighbors' + 1, n_channels)
-                    w_in_low = w_n_low[:, neighbor_idx, :] # (n_remains, n_channels)
+                    w_n_low = W_low[:, :, source_idx, :].conj() # (n_blocks - n_remains, n_neighbors', n_channels)
                     Xw_n_low = np.sum(X_low.conj() * w_n_low[:, :, np.newaxis, :], axis=3) # (n_blocks - n_remains, n_neighbors', n_frames)
 
                     Q_in_low = inv_R_ii_n_low[:, neighbor_idx, :, np.newaxis, np.newaxis] * XX_low[:, neighbor_idx, :, :, :] # (n_blocks - n_remains, n_frames, n_channels, n_channels)
@@ -914,7 +911,6 @@ class GaussIPSDTA(IPSDTAbase):
                     gamma_in_low = np.sum(mask_low[np.newaxis, neighbor_idx, :, np.newaxis] * RXXw_n_low, axis=1) # (n_blocks - n_remains, n_channels)
 
                     WQ_in_low = W_low[:, neighbor_idx, :, :] @ Q_in_low # (n_blocks - n_remains, n_sources, n_channels)
-                    condition_low = np.linalg.cond(WQ_in_low) < threshold
                     zeta_in_low = np.linalg.solve(WQ_in_low, e_n_low) # (n_blocks - n_remains, n_channels)
                     zeta_hat_in_low = np.linalg.solve(Q_in_low, gamma_in_low) # (n_blocks - n_remains, n_channels)
                     eta_in_low = np.squeeze(zeta_in_low[:, np.newaxis, :].conj() @ Q_in_low @ zeta_in_low[:, :, np.newaxis], axis=(1, 2)) # (n_blocks - n_remains,)
@@ -926,12 +922,11 @@ class GaussIPSDTA(IPSDTAbase):
                     weight_low = (eta_hat_in_low / (2 * eta_in_low)) * (1 - np.sqrt(1 + 4 * eta_in_low / (np.abs(eta_hat_in_low)**2)))
                     weight_if_low = 1 / np.sqrt(eta_in_low)
                     weight_low[condition_if_low] = weight_if_low[condition_if_low]
-                    w_in_low = np.where(np.logical_and(condition_low, np.logical_not(condition_if_low))[:, np.newaxis], weight_low[:, np.newaxis] * zeta_in_low - zeta_hat_in_low, w_in_low)
+                    w_in_low = weight_low[:, np.newaxis] * zeta_in_low - zeta_hat_in_low
                     W_low[:, neighbor_idx, source_idx, :] = w_in_low.conj()
 
                 for neighbor_idx in range(n_neighbors + 1):
                     w_n_high = W_high[:, :, source_idx, :].conj() # (n_remains, n_neighbors' + 1, n_channels)
-                    w_in_high = w_n_high[:, neighbor_idx, :] # (n_remains, n_channels)
                     Xw_n_high = np.sum(X_high.conj() * w_n_high[:, :, np.newaxis, :], axis=3) # (n_remains, n_neighbors' + 1, n_frames)
 
                     Q_in_high = inv_R_ii_n_high[:, neighbor_idx, :, np.newaxis, np.newaxis] * XX_high[:, neighbor_idx, :, :, :] # (n_remains, n_frames, n_channels, n_channels)
@@ -943,7 +938,6 @@ class GaussIPSDTA(IPSDTAbase):
                     gamma_in_high = np.sum(mask_high[np.newaxis, neighbor_idx, :, np.newaxis] * RXXw_n_high, axis=1) # (n_remains, n_channels)
 
                     WQ_in_high = W_high[:, neighbor_idx, :, :] @ Q_in_high # (n_blocks - n_remains, n_sources, n_channels), (n_remains, n_sources, n_channels)
-                    condition_high = np.linalg.cond(WQ_in_high) < threshold
                     zeta_in_high = np.linalg.solve(WQ_in_high, e_n_high) # (n_remains, n_channels)
                     zeta_hat_in_high = np.linalg.solve(Q_in_high, gamma_in_high) # (n_remains, n_channels)
                     eta_in_high = np.squeeze(zeta_in_high[:, np.newaxis, :].conj() @ Q_in_high @ zeta_in_high[:, :, np.newaxis], axis=(1, 2)) # (n_remains,)
@@ -955,7 +949,7 @@ class GaussIPSDTA(IPSDTAbase):
                     weight_high = (eta_hat_in_high / (2 * eta_in_high)) * (1 - np.sqrt(1 + 4 * eta_in_high / (np.abs(eta_hat_in_high)**2)))
                     weight_if_high = 1 / np.sqrt(eta_in_high)
                     weight_high[condition_if_high] = weight_if_high[condition_if_high]
-                    w_in_high = np.where(np.logical_and(condition_high, np.logical_not(condition_if_high))[:, np.newaxis], weight_high[:, np.newaxis] * zeta_in_high - zeta_hat_in_high, w_in_high)
+                    w_in_high = weight_high[:, np.newaxis] * zeta_in_high - zeta_hat_in_high
                     W_high[:, neighbor_idx, source_idx, :] = w_in_high.conj()
             
             W_low, W_high = W_low.reshape((n_blocks - n_remains) * n_neighbors, n_sources, n_channels), W_high.reshape(n_remains * (n_neighbors + 1), n_sources, n_channels)
@@ -986,7 +980,6 @@ class GaussIPSDTA(IPSDTAbase):
 
                 for neighbor_idx in range(n_neighbors):
                     w_n = W[:, :, source_idx, :].conj() # (n_blocks, n_neighbors', n_channels)
-                    w_in = w_n[:, neighbor_idx, :] # (n_blocks, n_channels)
                     Xw_n = np.sum(X.conj() * w_n[:, :, np.newaxis, :], axis=3) # (n_blocks, n_neighbors', n_frames)
 
                     Q_in = inv_R_ii_n[:, neighbor_idx, :, np.newaxis, np.newaxis] * XX[:, neighbor_idx, :, :, :] # (n_blocks, n_frames, n_channels, n_channels)
@@ -998,7 +991,6 @@ class GaussIPSDTA(IPSDTAbase):
                     gamma_in = np.sum(mask[np.newaxis, neighbor_idx, :, np.newaxis] * RXXw_n, axis=1) # (n_blocks, n_channels)
 
                     WQ_in = W[:, neighbor_idx, :, :] @ Q_in # (n_blocks, n_sources, n_channels)
-                    condition = np.linalg.cond(WQ_in) < threshold
                     zeta_in = np.linalg.solve(WQ_in, e_n) # (n_blocks, n_channels)
                     zeta_hat_in = np.linalg.solve(Q_in, gamma_in) # (n_blocks, n_channels)
                     eta_in = np.squeeze(zeta_in[:, np.newaxis, :].conj() @ Q_in @ zeta_in[:, :, np.newaxis], axis=(1, 2)) # (n_blocks,)
@@ -1010,7 +1002,7 @@ class GaussIPSDTA(IPSDTAbase):
                     weight = (eta_hat_in / (2 * eta_in)) * (1 - np.sqrt(1 + 4 * eta_in / (np.abs(eta_hat_in)**2)))
                     weight_if = 1 / np.sqrt(eta_in)
                     weight[condition_if] = weight_if[condition_if]
-                    w_in = np.where(np.logical_and(condition, np.logical_not(condition_if))[:, np.newaxis], weight[:, np.newaxis] * zeta_in - zeta_hat_in, w_in)
+                    w_in = weight[:, np.newaxis] * zeta_in - zeta_hat_in
                     W[:, neighbor_idx, source_idx, :] = w_in.conj()
             
             W = W.reshape(n_bins, n_sources, n_channels)
