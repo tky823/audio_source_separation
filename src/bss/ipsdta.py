@@ -926,7 +926,7 @@ class GaussIPSDTA(IPSDTAbase):
                     weight_low = (eta_hat_in_low / (2 * eta_in_low)) * (1 - np.sqrt(1 + 4 * eta_in_low / (np.abs(eta_hat_in_low)**2)))
                     weight_if_low = 1 / np.sqrt(eta_in_low)
                     weight_low[condition_if_low] = weight_if_low[condition_if_low]
-                    w_in_low = np.where(np.logical_and(condition_low[:, np.newaxis], np.logical_not(condition_if_low)), weight_low[:, np.newaxis] * zeta_in_low - zeta_hat_in_low, w_in_low)
+                    w_in_low = np.where(np.logical_and(condition_low, np.logical_not(condition_if_low))[:, np.newaxis], weight_low[:, np.newaxis] * zeta_in_low - zeta_hat_in_low, w_in_low)
                     W_low[:, neighbor_idx, source_idx, :] = w_in_low.conj()
 
                 for neighbor_idx in range(n_neighbors + 1):
@@ -955,7 +955,7 @@ class GaussIPSDTA(IPSDTAbase):
                     weight_high = (eta_hat_in_high / (2 * eta_in_high)) * (1 - np.sqrt(1 + 4 * eta_in_high / (np.abs(eta_hat_in_high)**2)))
                     weight_if_high = 1 / np.sqrt(eta_in_high)
                     weight_high[condition_if_high] = weight_if_high[condition_if_high]
-                    w_in_high = np.where(np.logical_and(condition_high[:, np.newaxis], np.logical_not(condition_if_high)), weight_high[:, np.newaxis] * zeta_in_high - zeta_hat_in_high, w_in_high)
+                    w_in_high = np.where(np.logical_and(condition_high, np.logical_not(condition_if_high))[:, np.newaxis], weight_high[:, np.newaxis] * zeta_in_high - zeta_hat_in_high, w_in_high)
                     W_high[:, neighbor_idx, source_idx, :] = w_in_high.conj()
             
             W_low, W_high = W_low.reshape((n_blocks - n_remains) * n_neighbors, n_sources, n_channels), W_high.reshape(n_remains * (n_neighbors + 1), n_sources, n_channels)
@@ -1010,7 +1010,7 @@ class GaussIPSDTA(IPSDTAbase):
                     weight = (eta_hat_in / (2 * eta_in)) * (1 - np.sqrt(1 + 4 * eta_in / (np.abs(eta_hat_in)**2)))
                     weight_if = 1 / np.sqrt(eta_in)
                     weight[condition_if] = weight_if[condition_if]
-                    w_in = np.where(np.logical_and(condition[:, np.newaxis], np.logical_not(condition_if)), weight[:, np.newaxis] * zeta_in - zeta_hat_in, w_in)
+                    w_in = np.where(np.logical_and(condition, np.logical_not(condition_if))[:, np.newaxis], weight[:, np.newaxis] * zeta_in - zeta_hat_in, w_in)
                     W[:, neighbor_idx, source_idx, :] = w_in.conj()
             
             W = W.reshape(n_bins, n_sources, n_channels)
