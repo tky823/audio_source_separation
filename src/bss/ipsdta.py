@@ -239,9 +239,9 @@ class GaussIPSDTA(IPSDTAbase):
             setattr(self, key, kwargs[key])
         
         if self.author.lower() in __authors_ipsdta__:
-            self._reset_block(**kwargs)
+            self._reset_block_diagonal(**kwargs)
     
-    def _reset_block(self, **kwargs):
+    def _reset_block_diagonal(self, **kwargs):
         n_basis = self.n_basis
         n_blocks = self.n_blocks
 
@@ -318,6 +318,7 @@ class GaussIPSDTA(IPSDTAbase):
             self.basis, self.activation = U, V
 
         if self.author.lower() == 'ikeshita':
+            self.algorithm_source = 'em'
             self.algorithm_spatial = 'fixed-point'
 
             if not hasattr(self, 'fixed_point'):
@@ -326,6 +327,7 @@ class GaussIPSDTA(IPSDTAbase):
                 self.fixed_point = self.fixed_point.copy()
         
         elif self.author.lower() == 'kondo':
+            self.algorithm_source = 'mm'
             self.algorithm_spatial = 'VCD'
         else:
             raise ValueError("Not support {}'s IPSDTA.".format(self.author))
@@ -334,6 +336,8 @@ class GaussIPSDTA(IPSDTAbase):
         s = "Gauss-IPSDTA("
         s += "n_basis={n_basis}"
         s += ", normalize={normalize}"
+        s += ", algorithm (source)={algorithm_source}"
+        s += ", algorithm (spatial)={algorithm_spatial}"
         if self.author.lower() == 'ikeshita':
             s += ", n_blocks={n_blocks}"
         s += ", author={author}"
@@ -349,9 +353,11 @@ class GaussIPSDTA(IPSDTAbase):
             self.update_spatial_model()
     
     def update_source_model(self):
-        if self.author.lower() == 'ikeshita':
+        algorithm_source = self.algorithm_source
+
+        if algorithm_source == 'em':
             self.update_source_model_em()
-        elif self.author.lower() == 'kondo':
+        elif algorithm_source == 'mm':
             self.update_source_model_mm()
         else:
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
