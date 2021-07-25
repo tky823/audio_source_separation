@@ -304,22 +304,7 @@ class GaussIPSDTA(IPSDTAbase):
             self.activation = self.activation.copy()
 
         if self.normalize:
-            U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
-
-            if n_remains > 0:
-                U_low, U_high = U # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_basis), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_basis)
-                trace_low, trace_high = np.trace(U_low, axis1=2, axis2=3).real, np.trace(U_high, axis1=2, axis2=3).real # (n_sources, n_blocks - n_remains, n_basis), (n_sources, n_remains, n_basis)
-                trace = np.concatenate([trace_low, trace_high], axis=1) # (n_sources, n_blocks, n_basis)
-                trace = trace.sum(axis=1) # (n_sources, n_basis)
-                U_low, U_high = U_low / trace[:, np.newaxis, np.newaxis, np.newaxis, :], U_high / trace[:, np.newaxis, np.newaxis, np.newaxis, :]
-                V = V * trace[:, :, np.newaxis]
-            else:
-                trace = np.trace(U, axis1=2, axis2=3).real # (n_sources, n_blocks, n_basis)
-                trace = trace.sum(axis=1) # (n_sources, n_basis)
-                U = U / trace[:, np.newaxis, np.newaxis, np.newaxis, :]
-                V = V * trace[:, :, np.newaxis]
-
-            self.basis, self.activation = U, V
+            self.normalize_psdtf()
         
         if self.algorithm_spatial == 'fixed-point':
             if not hasattr(self, 'fixed_point'):
@@ -331,8 +316,8 @@ class GaussIPSDTA(IPSDTAbase):
         s = "Gauss-IPSDTA("
         s += "n_basis={n_basis}"
         s += ", normalize={normalize}"
-        s += ", algorithm (source)={algorithm_source}"
-        s += ", algorithm (spatial)={algorithm_spatial}"
+        s += ", algorithm(source)={algorithm_source}"
+        s += ", algorithm(spatial)={algorithm_spatial}"
         if self.author.lower() in __authors_ipsdta__:
             s += ", n_blocks={n_blocks}"
         s += ", author={author}"
@@ -341,10 +326,9 @@ class GaussIPSDTA(IPSDTAbase):
         return s.format(**self.__dict__)
 
     def update_once(self):
-        spatial_iteration = self.spatial_iteration
         self.update_source_model()
 
-        for spatial_idx in range(spatial_iteration):
+        for spatial_idx in range(self.spatial_iteration):
             self.update_spatial_model()
     
     def update_source_model(self):
@@ -358,28 +342,7 @@ class GaussIPSDTA(IPSDTAbase):
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
         
         if self.normalize:
-            n_remains = self.n_remains
-
-            U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
-
-            if n_remains > 0:
-                U_low, U_high = U
-                U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors + n_remains, n_neighbors + n_remains)
-                trace_low, trace_high = np.trace(U_low, axis1=3, axis2=4).real, np.trace(U_high, axis1=3, axis2=4).real
-                trace = np.concatenate([trace_low, trace_high], axis=2) # (n_sources, n_basis, n_blocks)
-                trace = trace.sum(axis=2) # (n_sources, n_basis)
-                U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, np.newaxis], U_high / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
-                U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
-                V = V * trace[:, :, np.newaxis]
-            else:
-                U = U.transpose(0, 4, 1, 2, 3)
-                trace = np.trace(U, axis1=3, axis2=4).real
-                trace = trace.sum(axis=2) # (n_sources, n_basis)
-                U = U / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
-                U = U.transpose(0, 2, 3, 4, 1)
-                V = V * trace[:, :, np.newaxis]
-    
-            self.basis, self.activation = U, V
+            self.normalize_psdtf()
      
     def update_spatial_model(self):
         algorithm_spatial = self.algorithm_spatial
@@ -677,15 +640,16 @@ class GaussIPSDTA(IPSDTAbase):
             U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low = np.sum(U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
+            R_low, R_high = to_PSD(R_low, eps=eps), to_PSD(R_high, eps=eps)
             y_low, y_high = np.split(Y, [(n_blocks - n_remains)* n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
             y_low, y_high = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors), y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1)
 
-            R_low, R_high = to_PSD(R_low, eps=eps), to_PSD(R_high, eps=eps)
             yy_low = y_low[:, :, :, :, np.newaxis] * y_low[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             yy_high = y_high[:, :, :, :, np.newaxis] * y_high[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors + 1) # (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             yy_low, yy_high = to_PSD(yy_low, eps=eps), to_PSD(yy_high, eps=eps)
 
             inv_R_low, inv_R_high = np.linalg.inv(R_low), np.linalg.inv(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            inv_R_low, inv_R_high = to_PSD(inv_R_low, eps=eps), to_PSD(inv_R_high, eps=eps)
             Ryy_low, Ryy_high = inv_R_low @ yy_low, inv_R_high @ yy_high # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             RU_low = inv_R_low[:, np.newaxis, :, :, :, :] @ U_low[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             RU_high = inv_R_high[:, np.newaxis, :, :, :, :] @ U_high[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
@@ -701,13 +665,14 @@ class GaussIPSDTA(IPSDTAbase):
         else:
             U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            R = to_PSD(R, eps=eps) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors) # (n_sources, n_frames, n_blocks, n_neighbors)
 
-            R = to_PSD(R, eps=eps) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             yy = y[:, :, :, :, np.newaxis] * y[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             yy = to_PSD(yy, eps=eps)
 
             inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = to_PSD(inv_R, eps=eps)
             Ryy = inv_R @ yy # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RU = inv_R[:, np.newaxis, :, :, :, :] @ U[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             numerator = np.trace(RU @ Ryy[:, np.newaxis, :, :, :, :], axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_blocks)
@@ -1009,6 +974,36 @@ class GaussIPSDTA(IPSDTAbase):
         
         self.demix_filter = W
 
+    def normalize_psdtf(self):
+        if self.author.lower() in __authors_ipsdta__:
+            self.normalize_psdtf_block_diagonal()
+        else:
+            raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
+
+    def normalize_psdtf_block_diagonal(self):
+        n_remains = self.n_remains
+
+        U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
+
+        if n_remains > 0:
+            U_low, U_high = U
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            trace_low, trace_high = np.trace(U_low, axis1=3, axis2=4).real, np.trace(U_high, axis1=3, axis2=4).real
+            trace = np.concatenate([trace_low, trace_high], axis=2) # (n_sources, n_basis, n_blocks)
+            trace = trace.sum(axis=2) # (n_sources, n_basis)
+            U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, np.newaxis], U_high / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
+            U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
+            V = V * trace[:, :, np.newaxis]
+        else:
+            U = U.transpose(0, 4, 1, 2, 3)
+            trace = np.trace(U, axis1=3, axis2=4).real
+            trace = trace.sum(axis=2) # (n_sources, n_basis)
+            U = U / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
+            U = U.transpose(0, 2, 3, 4, 1)
+            V = V * trace[:, :, np.newaxis]
+
+        self.basis, self.activation = U, V
+
     def compute_negative_loglikelihood(self):
         if self.author.lower() in __authors_ipsdta__:
             loss = self.compute_negative_loglikelihood_block_diagonal()
@@ -1036,7 +1031,7 @@ class GaussIPSDTA(IPSDTAbase):
             R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
             y_low, y_high = np.split(Y, [(n_blocks - n_remains)* n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
             
-            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4), to_PSD(R_high, axis1=3, axis2=4)
+            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4, eps=eps), to_PSD(R_high, axis1=3, axis2=4, eps=eps)
             y_low = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
             y_high = y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1, 1) # (n_sources, n_frames, 1, n_neighbors + 1, 1)
 
@@ -1058,7 +1053,7 @@ class GaussIPSDTA(IPSDTAbase):
             R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             y = Y # (n_sources, n_frames, n_blocks * n_neighbors)
 
-            R = to_PSD(R, axis1=3, axis2=4)
+            R = to_PSD(R, axis1=3, axis2=4, eps=eps)
             y = y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
 
             inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
@@ -1221,22 +1216,7 @@ class tIPSDTA(IPSDTAbase):
             self.activation = self.activation.copy()
 
         if self.normalize:
-            U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
-
-            if n_remains > 0:
-                U_low, U_high = U # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_basis), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_basis)
-                trace_low, trace_high = np.trace(U_low, axis1=2, axis2=3).real, np.trace(U_high, axis1=2, axis2=3).real # (n_sources, n_blocks - n_remains, n_basis), (n_sources, n_remains, n_basis)
-                trace = np.concatenate([trace_low, trace_high], axis=1) # (n_sources, n_blocks, n_basis)
-                trace = trace.sum(axis=1) # (n_sources, n_basis)
-                U_low, U_high = U_low / trace[:, np.newaxis, np.newaxis, np.newaxis, :], U_high / trace[:, np.newaxis, np.newaxis, np.newaxis, :]
-                V = V * trace[:, :, np.newaxis]
-            else:
-                trace = np.trace(U, axis1=2, axis2=3).real # (n_sources, n_blocks, n_basis)
-                trace = trace.sum(axis=1) # (n_sources, n_basis)
-                U = U / trace[:, np.newaxis, np.newaxis, np.newaxis, :]
-                V = V * trace[:, :, np.newaxis]
-
-            self.basis, self.activation = U, V
+            self.normalize_psdtf()
 
     def __repr__(self):
         s = "t-IPSDTA("
@@ -1252,13 +1232,10 @@ class tIPSDTA(IPSDTAbase):
         return s.format(**self.__dict__)
 
     def update_once(self):
-        spatial_iteration = self.spatial_iteration
         self.update_source_model()
 
-        """
-        for spatial_idx in range(spatial_iteration):
+        for spatial_idx in range(self.spatial_iteration):
             self.update_spatial_model()
-        """
     
     def update_source_model(self):
         algorithm_source = self.algorithm_source
@@ -1269,33 +1246,11 @@ class tIPSDTA(IPSDTAbase):
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
         
         if self.normalize:
-            n_remains = self.n_remains
-
-            U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
-
-            if n_remains > 0:
-                U_low, U_high = U
-                U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors + n_remains, n_neighbors + n_remains)
-                trace_low, trace_high = np.trace(U_low, axis1=3, axis2=4).real, np.trace(U_high, axis1=3, axis2=4).real
-                trace = np.concatenate([trace_low, trace_high], axis=2) # (n_sources, n_basis, n_blocks)
-                trace = trace.sum(axis=2) # (n_sources, n_basis)
-                U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, np.newaxis], U_high / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
-                U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
-                V = V * trace[:, :, np.newaxis]
-            else:
-                U = U.transpose(0, 4, 1, 2, 3)
-                trace = np.trace(U, axis1=3, axis2=4).real
-                trace = trace.sum(axis=2) # (n_sources, n_basis)
-                U = U / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
-                U = U.transpose(0, 2, 3, 4, 1)
-                V = V * trace[:, :, np.newaxis]
+            self.normalize_psdtf()
     
-            self.basis, self.activation = U, V
-    
-
     def update_source_model_mm(self):
         self.update_basis_mm()
-        # self.update_activation_mm()
+        self.update_activation_mm()
 
     def update_basis_mm(self):
         n_sources = self.n_sources
@@ -1326,9 +1281,9 @@ class tIPSDTA(IPSDTAbase):
             inv_R_low, inv_R_high = to_PSD(inv_R_low, axis1=3, axis2=4, eps=eps), to_PSD(inv_R_high, axis1=3, axis2=4, eps=eps)
 
             Ry_low, Ry_high = inv_R_low @ y_low, inv_R_high @ y_high # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1), (n_sources, n_frames, n_remains, n_neighbors + 1, 1)
-            yRy_low, yRy_high = np.sum(y_low.conj() * Ry_low, axis=(2, 3, 4)), np.sum(y_high.conj() * Ry_high, axis=(2, 3, 4))
+            yRy_low, yRy_high = np.sum(y_low.conj() * Ry_low, axis=(2, 3, 4)).real, np.sum(y_high.conj() * Ry_high, axis=(2, 3, 4)).real
             yRy = yRy_low + yRy_high # (n_sources, n_frames)
-            pi = (nu + 2 * n_bins) / (nu + yRy) # (n_sources, n_frames)
+            pi = (nu + 2 * n_bins) / (nu + 2 * yRy) # (n_sources, n_frames)
             
             yy_low = y_low @ y_low.transpose(0, 1, 2, 4, 3).conj() + eps * np.eye(n_neighbors)
             yy_high = y_high @ y_high.transpose(0, 1, 2, 4, 3).conj() + eps * np.eye(n_neighbors + 1)
@@ -1392,8 +1347,8 @@ class tIPSDTA(IPSDTAbase):
             inv_R = to_PSD(inv_R, axis1=3, axis2=4, eps=eps)
 
             Ry = inv_R @ y # (n_sources, n_frames, n_blocks, n_neighbors, 1)
-            yRy = np.sum(y.conj() * Ry, axis=(2, 3, 4)) # (n_sources, n_frames)
-            pi = (nu + 2 * n_bins) / (nu + yRy) # (n_sources, n_frames)
+            yRy = np.sum(y.conj() * Ry, axis=(2, 3, 4)).real # (n_sources, n_frames)
+            pi = (nu + 2 * n_bins) / (nu + 2 * yRy) # (n_sources, n_frames)
 
             yy = y @ y.transpose(0, 1, 2, 4, 3).conj() + eps * np.eye(n_neighbors)
             RyyR = inv_R @ yy @ inv_R # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
@@ -1427,9 +1382,8 @@ class tIPSDTA(IPSDTAbase):
         self.basis, self.activation = U, V
 
     def update_activation_mm(self):
-        raise NotImplementedError
         n_sources = self.n_sources
-        n_frames = self.n_frames
+        n_bins, n_frames = self.n_bins, self.n_frames
         n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
         n_remains = self.n_remains
 
@@ -1447,15 +1401,16 @@ class tIPSDTA(IPSDTAbase):
             U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1, n_neighbors + 1)
             R_low = np.sum(U_low[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
+            R_low, R_high = to_PSD(R_low, eps=eps), to_PSD(R_high, eps=eps)
             y_low, y_high = np.split(Y, [(n_blocks - n_remains)* n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
             y_low, y_high = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors), y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1)
 
-            R_low, R_high = to_PSD(R_low, eps=eps), to_PSD(R_high, eps=eps)
             yy_low = y_low[:, :, :, :, np.newaxis] * y_low[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             yy_high = y_high[:, :, :, :, np.newaxis] * y_high[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors + 1) # (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             yy_low, yy_high = to_PSD(yy_low, eps=eps), to_PSD(yy_high, eps=eps)
 
             inv_R_low, inv_R_high = np.linalg.inv(R_low), np.linalg.inv(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
+            inv_R_low, inv_R_high = to_PSD(inv_R_low, eps=eps), to_PSD(inv_R_high, eps=eps)
             Ryy_low, Ryy_high = inv_R_low @ yy_low, inv_R_high @ yy_high # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
             RU_low = inv_R_low[:, np.newaxis, :, :, :, :] @ U_low[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors)
             RU_high = inv_R_high[:, np.newaxis, :, :, :, :] @ U_high[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_remains, n_neighbors + 1, n_neighbors + 1)
@@ -1467,28 +1422,68 @@ class tIPSDTA(IPSDTAbase):
             denominator_high = np.trace(RU_high, axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_remains)
             denominator = np.concatenate([denominator_low, denominator_high], axis=3) # (n_sources, n_basis, n_frames, n_blocks)
 
+            Ry_low = np.sum(inv_R_low * y_low[:, :, :, np.newaxis, :], axis=4) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors)
+            Ry_high = np.sum(inv_R_high * y_high[:, :, :, np.newaxis, :], axis=4) # (n_sources, n_frames, n_remains, n_neighbors + 1)
+            yRy_low, yRy_high = np.sum(y_low.conj() * Ry_low, axis=(2, 3)).real, np.sum(y_high.conj() * Ry_high, axis=(2, 3)).real # (n_sources, n_frames), (n_sources, n_frames)
+            yRy = yRy_low + yRy_high
+
             U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1) # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_basis), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_basis)
         else:
             U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            R = to_PSD(R, eps=eps) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors) # (n_sources, n_frames, n_blocks, n_neighbors)
 
-            R = to_PSD(R, eps=eps) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             yy = y[:, :, :, :, np.newaxis] * y[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             yy = to_PSD(yy, eps=eps)
 
             inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = to_PSD(inv_R, eps=eps)
             Ryy = inv_R @ yy # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RU = inv_R[:, np.newaxis, :, :, :, :] @ U[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             numerator = np.trace(RU @ Ryy[:, np.newaxis, :, :, :, :], axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_blocks)
             denominator = np.trace(RU, axis1=-2, axis2=-1).real # (n_sources, n_basis, n_frames, n_blocks)
 
+            Ry = np.sum(inv_R * y[:, :, :, np.newaxis, :], axis=4) # (n_sources, n_frames, n_blocks, n_neighbors)
+            yRy = np.sum(y.conj() * Ry, axis=(2, 3)).real # (n_sources, n_frames)
+            
             U = U.transpose(0, 2, 3, 4, 1)
         
-        numerator, denominator = np.sum(numerator, axis=3), np.sum(denominator, axis=3) # (n_sources, n_basis, n_frames), (n_sources, n_basis, n_frames)
+        pi = (nu + 2 * n_bins) / (nu + 2 * yRy) # (n_sources, n_frames)
+        numerator, denominator = pi[:, np.newaxis, :] * np.sum(numerator, axis=3), np.sum(denominator, axis=3) # (n_sources, n_basis, n_frames), (n_sources, n_basis, n_frames)
         numerator[numerator < 0] = 0
         denominator[denominator < eps] = eps
         V = V * np.sqrt(numerator / denominator) # (n_sources, n_basis, n_frames)
+
+        self.basis, self.activation = U, V
+
+    def normalize_psdtf(self):
+        if self.author.lower() in __authors_ipsdta__:
+            self.normalize_psdtf_block_diagonal()
+        else:
+            raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
+
+    def normalize_psdtf_block_diagonal(self):
+        n_remains = self.n_remains
+
+        U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
+
+        if n_remains > 0:
+            U_low, U_high = U
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - 1, n_neighbors, n_neighbors), (n_sources, n_basis, 1, n_neighbors + n_remains, n_neighbors + n_remains)
+            trace_low, trace_high = np.trace(U_low, axis1=3, axis2=4).real, np.trace(U_high, axis1=3, axis2=4).real
+            trace = np.concatenate([trace_low, trace_high], axis=2) # (n_sources, n_basis, n_blocks)
+            trace = trace.sum(axis=2) # (n_sources, n_basis)
+            U_low, U_high = U_low / trace[:, :, np.newaxis, np.newaxis, np.newaxis], U_high / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
+            U = U_low.transpose(0, 2, 3, 4, 1), U_high.transpose(0, 2, 3, 4, 1)
+            V = V * trace[:, :, np.newaxis]
+        else:
+            U = U.transpose(0, 4, 1, 2, 3)
+            trace = np.trace(U, axis1=3, axis2=4).real
+            trace = trace.sum(axis=2) # (n_sources, n_basis)
+            U = U / trace[:, :, np.newaxis, np.newaxis, np.newaxis]
+            U = U.transpose(0, 2, 3, 4, 1)
+            V = V * trace[:, :, np.newaxis]
 
         self.basis, self.activation = U, V
 
@@ -1521,7 +1516,7 @@ class tIPSDTA(IPSDTAbase):
             R_high = np.sum(U_high[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, 1, n_neighbors + 1, n_neighbors + 1)
             y_low, y_high = np.split(Y, [(n_blocks - n_remains)* n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
             
-            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4), to_PSD(R_high, axis1=3, axis2=4)
+            R_low, R_high = to_PSD(R_low, axis1=3, axis2=4, eps=eps), to_PSD(R_high, axis1=3, axis2=4, eps=eps)
             y_low = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
             y_high = y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1, 1) # (n_sources, n_frames, 1, n_neighbors + 1, 1)
 
@@ -1532,18 +1527,31 @@ class tIPSDTA(IPSDTAbase):
             Ry_low = Ry_low.reshape(n_sources, n_frames, (n_blocks - n_remains) * n_neighbors)
             Ry_high = Ry_high.reshape(n_sources, n_frames, n_remains * (n_neighbors + 1))
             Ry = np.concatenate([Ry_low, Ry_high], axis=2) # (n_sources, n_frames, n_bins)
+
+            eigvals_low, eigvals_high = np.linalg.eigvalsh(R_low), np.linalg.eigvalsh(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1)
+            eigvals_low[eigvals_low < eps], eigvals_high[eigvals_high < eps] = eps, eps
+            logdet_low, logdet_high = np.log(eigvals_low), np.log(eigvals_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1)
+            logdet_low, logdet_high = logdet_low.sum(axis=3), logdet_high.sum(axis=3) # (n_sources, n_frames, n_blocks - n_remains), (n_sources, n_frames, n_remains)
+            logdet_R = np.concatenate([logdet_low, logdet_high], axis=2)# (n_sources, n_frames, n_blocks)
         else:
             U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             y = Y # (n_sources, n_frames, n_blocks * n_neighbors)
 
-            R = to_PSD(R, axis1=3, axis2=4)
+            R = to_PSD(R, axis1=3, axis2=4, eps=eps)
             y = y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
 
             inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             inv_R = to_PSD(inv_R, eps=eps)
             Ry = inv_R @ y # (n_sources, n_frames, n_blocks, n_neighbors, 1)
             Ry = Ry.reshape(n_sources, n_frames, n_blocks * n_neighbors)
+
+            eigvals = np.linalg.eigvalsh(R) # (n_sources, n_frames, n_blocks, n_neighbors)
+            eigvals[eigvals < eps] = eps
+            logdet_R = np.log(eigvals) # (n_sources, n_frames, n_blocks, n_neighbors)
+            logdet_R = logdet_R.sum(axis=3) # (n_sources, n_frames, n_blocks)
+        
+        logdet_R = logdet_R.sum(axis=2) # (n_sources, n_frames)
         
         eigvals = np.linalg.eigvals(W_Hermite) # (n_bins, n_sources)
         eigvals = np.abs(eigvals)
@@ -1553,7 +1561,7 @@ class tIPSDTA(IPSDTAbase):
 
         y_Hermite = Y.conj()
         yRy = np.sum(y_Hermite * Ry, axis=2).real # (n_sources, n_frames)
-        loss = np.sum((nu + 2 * n_bins) * np.log(1 + (2 / nu) * yRy) / 2) - 2 * n_frames * logdet_W.sum()
+        loss = logdet_R.sum() + (nu + 2 * n_bins) / 2 * np.sum(np.log(1 + (2 / nu) * yRy)) - 2 * n_frames * logdet_W.sum()
 
         return loss
 
