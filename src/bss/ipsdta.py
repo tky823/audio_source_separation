@@ -1090,6 +1090,7 @@ class tIPSDTA(IPSDTAbase):
         """
         Args:
             nu <float>: Degree of freedom
+            author <str>: 'Kondo'
         """
         super().__init__(n_basis=n_basis, normalize=normalize, callbacks=callbacks, reference_id=reference_id, recordable_loss=recordable_loss, eps=eps)
 
