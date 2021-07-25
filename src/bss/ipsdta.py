@@ -155,8 +155,12 @@ class IPSDTAbase:
 class GaussIPSDTA(IPSDTAbase):
     """
         Gauss Independent Positive Semi-Definite Tensor Analysis
-        Reference: "Independent Positive Semidefinite Tensor Analysisin Blind Source Separation"
-        See https://ieeexplore.ieee.org/document/8553546
+        References:
+            "Independent Positive Semidefinite Tensor Analysisin Blind Source Separation"
+            "Convergence-Guaranteed Independent Positive Semidefinite Tensor Analysis Based on Student's T Distribution"
+        See:
+            https://ieeexplore.ieee.org/document/8553546
+            https://ieeexplore.ieee.org/document/9054150
     """
     def __init__(self, n_basis=10, spatial_iteration=None, normalize=True, callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
         """
@@ -177,11 +181,15 @@ class GaussIPSDTA(IPSDTAbase):
                     raise ValueError("Invalid keywords.")
                 for key in __kwargs_ikeshita_ipsdta__.keys():
                     setattr(self, key, __kwargs_ikeshita_ipsdta__[key])
+                self.algorithm_source = 'em'
+                self.algorithm_spatial = 'fixed-point'
             elif author.lower() == 'kondo':
                 if set(kwargs) - set(__kwargs_kondo_ipsdta__) != set():
                     raise ValueError("Invalid keywords.")
                 for key in __kwargs_kondo_ipsdta__.keys():
                     setattr(self, key, __kwargs_kondo_ipsdta__[key])
+                self.algorithm_source = 'mm'
+                self.algorithm_spatial = 'vcd'
             for key in kwargs.keys():
                 setattr(self, key, kwargs[key])
         else:
@@ -235,9 +243,9 @@ class GaussIPSDTA(IPSDTAbase):
             setattr(self, key, kwargs[key])
         
         if self.author.lower() in __authors_ipsdta__:
-            self._reset_block(**kwargs)
+            self._reset_block_diagonal(**kwargs)
     
-    def _reset_block(self, **kwargs):
+    def _reset_block_diagonal(self, **kwargs):
         n_basis = self.n_basis
         n_blocks = self.n_blocks
 
@@ -312,24 +320,19 @@ class GaussIPSDTA(IPSDTAbase):
                 V = V * trace[:, :, np.newaxis]
 
             self.basis, self.activation = U, V
-
-        if self.author.lower() == 'ikeshita':
-            self.algorithm_spatial = 'fixed-point'
-
+        
+        if self.algorithm_spatial == 'fixed-point':
             if not hasattr(self, 'fixed_point'):
                 self.fixed_point = np.ones((n_sources, n_bins), dtype=np.complex128)
             else:
                 self.fixed_point = self.fixed_point.copy()
-        
-        elif self.author.lower() == 'kondo':
-            self.algorithm_spatial = 'VCD'
-        else:
-            raise ValueError("Not support {}'s IPSDTA.".format(self.author))
 
     def __repr__(self):
         s = "Gauss-IPSDTA("
         s += "n_basis={n_basis}"
         s += ", normalize={normalize}"
+        s += ", algorithm (source)={algorithm_source}"
+        s += ", algorithm (spatial)={algorithm_spatial}"
         if self.author.lower() == 'ikeshita':
             s += ", n_blocks={n_blocks}"
         s += ", author={author}"
@@ -345,9 +348,11 @@ class GaussIPSDTA(IPSDTAbase):
             self.update_spatial_model()
     
     def update_source_model(self):
-        if self.author.lower() == 'ikeshita':
+        algorithm_source = self.algorithm_source
+
+        if algorithm_source == 'em':
             self.update_source_model_em()
-        elif self.author.lower() == 'kondo':
+        elif algorithm_source == 'mm':
             self.update_source_model_mm()
         else:
             raise NotImplementedError("Not support {}'s IPSDTA.".format(self.author))
@@ -381,7 +386,7 @@ class GaussIPSDTA(IPSDTAbase):
 
         if algorithm_spatial == 'fixed-point':
             self.update_spatial_model_fixed_point()
-        elif algorithm_spatial == 'VCD':
+        elif algorithm_spatial == 'vcd':
             self.update_spatial_model_vcd()
         else:
             raise NotImplementedError("Not support {}-based spatial model updates.".format(algorithm_spatial))
@@ -846,7 +851,7 @@ class GaussIPSDTA(IPSDTAbase):
 
         self.demix_filter = W_Hermite
         self.fixed_point = Lambda
-    
+
     def update_spatial_model_vcd(self):
         n_bins, n_frames = self.n_bins, self.n_frames
         n_sources, n_channels = self.n_sources, self.n_channels
@@ -854,82 +859,165 @@ class GaussIPSDTA(IPSDTAbase):
         n_remains = self.n_remains
         eps = self.eps
 
-        X, W_Hermite = self.input, self.demix_filter
-        Y = self.separate(X, demix_filter=W_Hermite) # (n_sources, n_bins, n_frames)
+        X, W = self.input, self.demix_filter
+        Y = self.separate(X, demix_filter=W) # (n_sources, n_bins, n_frames)
         X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
         Y = Y.transpose(0, 2, 1) # (n_sources, n_frames, n_bins)
 
-        U, V = self.basis.transpose(0, 4, 1, 2, 3), self.activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors), (n_sources, n_basis, n_frames)
-        R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-        R = to_PSD(R, axis1=3, axis2=4)
+        U, V = self.basis, self.activation # _, (n_sources, n_basis, n_frames)
 
-        if n_remains == 0:
-            W_Hermite = W_Hermite.reshape(n_blocks, n_neighbors, n_sources, n_channels)
-            X = X.reshape(n_blocks, n_neighbors, n_frames, n_channels)
-            XX = X[:, :, np.newaxis, :, :, np.newaxis] * X[:, np.newaxis, :, :, np.newaxis, :].conj() # (n_blocks, n_neighbors, n_neighbors', n_frames, n_channels, n_channels')
-            XX_diag = np.diagonal(XX, axis1=1, axis2=2).transpose(0, 4, 1, 2, 3) # (n_blocks, n_neighbors, n_frames, n_channels, n_channels')
+        if n_remains > 0:
+            W_low, W_high = np.split(W, [(n_blocks - n_remains) * n_neighbors], axis=0)
+            W_low, W_high = W_low.reshape(n_blocks - n_remains, n_neighbors, n_sources, n_channels), W_high.reshape(n_remains, n_neighbors + 1, n_sources, n_channels)
+            X_low, X_high = np.split(X, [(n_blocks - n_remains) * n_neighbors], axis=0)
+            X_low, X_high = X_low.reshape(n_blocks - n_remains, n_neighbors, n_frames, n_channels), X_high.reshape(n_remains, n_neighbors + 1, n_frames, n_channels)
+            U_low, U_high = U
+            U_low, U_high = U_low.transpose(0, 4, 1, 2, 3), U_high.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks - n_remains, n_neighbors), (n_sources, n_basis, n_remains, n_neighbors + 1)
 
-            inv_R = np.linalg.inv(R.conj() + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-            inv_R_diag = np.diagonal(inv_R, axis1=3, axis2=4) # (n_sources, n_frames, n_blocks, n_neighbors)
-            inv_R_diag = inv_R_diag.transpose(0, 2, 3, 1) # (n_sources, n_blocks, n_neighbors, n_frames)
+            XX_low = X_low[:, :, :, :, np.newaxis] * X_low[:, :, :, np.newaxis, :].conj() # (n_blocks - n_remains, n_neighbors, n_frames, n_channels, n_channels)
+            XX_high = X_high[:, :, :, :, np.newaxis] * X_high[:, :, :, np.newaxis, :].conj() # (n_remains, n_neighbors + 1, n_frames, n_channels, n_channels)
+            XX_low, XX_high = to_PSD(XX_low, eps=eps), to_PSD(XX_high, eps=eps)
 
-            Q = np.mean(inv_R_diag[:, :, :, :, np.newaxis, np.newaxis] * XX_diag[np.newaxis, :, :, :, :, :], axis=3) # (n_sources, n_blocks, n_neighbors, n_channels, n_channels')
-            
-            inv_R = np.linalg.inv(R.conj() + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors')
-            inv_R = inv_R.transpose(0, 2, 3, 4, 1) # (n_sources, n_blocks, n_neighbors, n_neighbors', n_frames)
-
-            E = np.eye(n_sources, n_channels)
-            E = np.tile(E, reps=(n_blocks, n_neighbors, 1, 1)) # (n_blocks, n_neighbors, n_sources, n_channels)
+            mask_low, mask_high = 1 - np.eye(n_neighbors), 1 - np.eye(n_neighbors + 1) # (n_neighbors, n_neighbors), (n_neighbors + 1, n_neighbors + 1)
+            E_low = np.tile(np.eye(n_sources, n_channels), reps=(n_blocks - n_remains, 1, 1)) # (n_neighbors, n_sources, n_channels)
+            E_high = np.tile(np.eye(n_sources, n_channels), reps=(n_remains, 1, 1)) # (n_neighbors + 1, n_sources, n_channels)
 
             for source_idx in range(n_sources):
-                W_n = W_Hermite[:, :, source_idx, :].conj() # (n_blocks, n_neighbors, n_channels)
-                Q_n = Q[source_idx, :, :, :, :] # (n_blocks, n_neighbors, n_channels, n_channels')
+                e_n_low, e_n_high = E_low[:, source_idx, :], E_high[:, source_idx, :] # (n_blocks - n_remains, n_channels), (n_remains, n_channels)
 
-                inv_R_n = inv_R[source_idx, :, :, :, :] # (n_blocks, n_neighbors, n_neighbors', n_frames)
-                XXw_n = XX @ W_n[:, np.newaxis, :, np.newaxis, :, np.newaxis] # (n_blocks, n_neighbors, n_neighbors', n_frames, n_channels, 1)
-                gamma = np.mean(XXw_n * inv_R_n[:, :, :, :, np.newaxis, np.newaxis], axis=(3, 5)) # (n_blocks, n_neighbors, n_neighbors', n_channels)
-                mask = 1 - np.eye(n_neighbors)
-                gamma = mask[np.newaxis, :, :, np.newaxis] * gamma # (n_blocks, n_neighbors, n_neighbors', n_channels)
-                gamma = gamma.sum(axis=2) # (n_blocks, n_neighbors, n_channels)
-
-                WQ_n = W_Hermite @ Q_n # (n_blocks, n_neighbors, n_channels, n_channels)
-                e_n = E[:, :, source_idx, :] # (n_blocks, n_neighbors, n_channels)
-
-                xi = np.linalg.solve(WQ_n, e_n) # (n_blocks, n_neighbors, n_channels)
-                xi_hat = np.linalg.solve(Q_n, gamma) # (n_blocks, n_neighbors, n_channels)
-
-                eta = np.squeeze(xi[:, :, np.newaxis, :].conj() @ Q_n @ xi[:, :, :, np.newaxis], axis=(2, 3)) # (n_blocks, n_neighbors)
-                eta_hat = np.squeeze(xi[:, :, np.newaxis, :].conj() @ Q_n @ xi_hat[:, :, :, np.newaxis], axis=(2, 3)) # (n_blocks, n_neighbors)
-                eta, eta_hat = eta.real, eta_hat.real
-
-                denominator = np.abs(eta_hat)**2
-                condition = denominator < eps
-                denominator[condition] = eps
-                eta_hat[condition] = eps
+                U_n_low = U_low[source_idx, :, :, :, :] # (n_basis, n_blocks - n_remains, n_neighbors', n_neighbors)
+                U_n_high = U_high[source_idx, :, :, :, :] # (n_basis, n_remains, n_neighbors' + 1, n_neighbors + 1)
+                V_n = V[source_idx, :] # (n_basis, n_frames)
+                R_n_low = np.sum(U_n_low[:, np.newaxis, :, :, :] * V_n[:, :, np.newaxis, np.newaxis, np.newaxis], axis=0) # (n_frames, n_blocks - n_remains, n_neighbors', n_neighbors)
+                R_n_high = np.sum(U_n_high[:, np.newaxis, :, :, :] * V_n[:, :, np.newaxis, np.newaxis, np.newaxis], axis=0) # (n_frames, n_remains, n_neighbors' + 1, n_neighbors + 1)
+                R_n_low, R_n_high = to_PSD(R_n_low, axis1=2, axis2=3, eps=eps), to_PSD(R_n_high, axis1=2, axis2=3, eps=eps)
                 
-                coeff_if = 1 / np.sqrt(eta)
-                coeff = 0.5 * eta / eta_hat * (1 - np.sqrt(1 + 4 * eta / denominator))
-                coeff[condition] = coeff_if[condition]
+                inv_R_n_low, inv_R_n_high = np.linalg.inv(R_n_low), np.linalg.inv(R_n_high) # (n_frames, n_blocks - n_remains, n_neighbors', n_neighbors), (n_frames, n_remains, n_neighbors' + 1, n_neighbors + 1)
+                inv_R_n_low, inv_R_n_high = to_PSD(inv_R_n_low, eps=eps), to_PSD(inv_R_n_high, eps=eps)
+                inv_R_n_low, inv_R_n_high = inv_R_n_low.transpose(1, 3, 2, 0), inv_R_n_high.transpose(1, 3, 2, 0) # (n_blocks - n_remains, n_neighbors, n_neighbors', n_frames), (n_remains, n_neighbors + 1, n_neighbors' + 1, n_frames)
+                inv_R_ii_n_low, inv_R_ii_n_high = np.diagonal(inv_R_n_low, axis1=1, axis2=2).real, np.diagonal(inv_R_n_high, axis1=1, axis2=2).real # (n_blocks - n_remains, n_frames, n_neighbors), (n_remains, n_frames, n_neighbors + 1)
+                inv_R_ii_n_low, inv_R_ii_n_high = inv_R_ii_n_low.transpose(0, 2, 1), inv_R_ii_n_high.transpose(0, 2, 1) # (n_blocks - n_remains, n_neighbors, n_frames), (n_remains, n_neighbors + 1, n_frames)
+                
+                for neighbor_idx in range(n_neighbors):
+                    w_n_low = W_low[:, :, source_idx, :].conj() # (n_blocks - n_remains, n_neighbors', n_channels)
+                    Xw_n_low = np.sum(X_low.conj() * w_n_low[:, :, np.newaxis, :], axis=3) # (n_blocks - n_remains, n_neighbors', n_frames)
 
-                w_n = coeff[:, :, np.newaxis] * xi - xi_hat
-                W_Hermite[:, :, source_idx, :] = w_n.conj()
-                # if condition number is too big, `denominator[denominator < eps] = eps` may diverge of cost function.
+                    Q_in_low = inv_R_ii_n_low[:, neighbor_idx, :, np.newaxis, np.newaxis] * XX_low[:, neighbor_idx, :, :, :] # (n_blocks - n_remains, n_frames, n_channels, n_channels)
+                    Q_in_low = Q_in_low.mean(axis=1) # (n_blocks - n_remains, n_channels, n_channels)
+                    Q_in_low = to_PSD(Q_in_low, eps=eps)
+
+                    XXw_n_low = X_low[:, neighbor_idx, np.newaxis, :, :] * Xw_n_low[:, :, :, np.newaxis] # (n_blocks - n_remains, n_neighbors', n_frames, n_channels)
+                    RXXw_n_low = np.mean(inv_R_n_low[:, neighbor_idx, :, :, np.newaxis] * XXw_n_low, axis=2) # (n_blocks - n_remains, n_neighbors', n_channels)
+                    gamma_in_low = np.sum(mask_low[np.newaxis, neighbor_idx, :, np.newaxis] * RXXw_n_low, axis=1) # (n_blocks - n_remains, n_channels)
+
+                    WQ_in_low = W_low[:, neighbor_idx, :, :] @ Q_in_low # (n_blocks - n_remains, n_sources, n_channels)
+                    zeta_in_low = np.linalg.solve(WQ_in_low, e_n_low) # (n_blocks - n_remains, n_channels)
+                    zeta_hat_in_low = np.linalg.solve(Q_in_low, gamma_in_low) # (n_blocks - n_remains, n_channels)
+                    eta_in_low = np.squeeze(zeta_in_low[:, np.newaxis, :].conj() @ Q_in_low @ zeta_in_low[:, :, np.newaxis], axis=(1, 2)) # (n_blocks - n_remains,)
+                    eta_hat_in_low = np.squeeze(zeta_in_low[:, np.newaxis, :].conj() @ Q_in_low @ zeta_hat_in_low[:, :, np.newaxis], axis=(1, 2)) # (n_blocks - n_remains,)
+                    
+                    eta_in_low[np.abs(eta_in_low) < eps] = eps
+                    condition_if_low = np.abs(eta_hat_in_low) < eps
+                    eta_hat_in_low[condition_if_low] = eps
+                    weight_low = (eta_hat_in_low / (2 * eta_in_low)) * (1 - np.sqrt(1 + 4 * eta_in_low / (np.abs(eta_hat_in_low)**2)))
+                    weight_if_low = 1 / np.sqrt(eta_in_low)
+                    weight_low[condition_if_low] = weight_if_low[condition_if_low]
+                    w_in_low = weight_low[:, np.newaxis] * zeta_in_low - zeta_hat_in_low
+                    W_low[:, neighbor_idx, source_idx, :] = w_in_low.conj()
+
+                for neighbor_idx in range(n_neighbors + 1):
+                    w_n_high = W_high[:, :, source_idx, :].conj() # (n_remains, n_neighbors' + 1, n_channels)
+                    Xw_n_high = np.sum(X_high.conj() * w_n_high[:, :, np.newaxis, :], axis=3) # (n_remains, n_neighbors' + 1, n_frames)
+
+                    Q_in_high = inv_R_ii_n_high[:, neighbor_idx, :, np.newaxis, np.newaxis] * XX_high[:, neighbor_idx, :, :, :] # (n_remains, n_frames, n_channels, n_channels)
+                    Q_in_high = Q_in_high.mean(axis=1) # (n_remains, n_channels, n_channels)
+                    Q_in_high = to_PSD(Q_in_high, eps=eps)
+
+                    XXw_n_high = X_high[:, neighbor_idx, np.newaxis, :, :] * Xw_n_high[:, :, :, np.newaxis] # (n_remains, n_neighbors' + 1, n_frames, n_channels)
+                    RXXw_n_high = np.mean(inv_R_n_high[:, neighbor_idx, :, :, np.newaxis] * XXw_n_high, axis=2) # (n_remains, n_neighbors' + 1, n_channels)
+                    gamma_in_high = np.sum(mask_high[np.newaxis, neighbor_idx, :, np.newaxis] * RXXw_n_high, axis=1) # (n_remains, n_channels)
+
+                    WQ_in_high = W_high[:, neighbor_idx, :, :] @ Q_in_high # (n_blocks - n_remains, n_sources, n_channels), (n_remains, n_sources, n_channels)
+                    zeta_in_high = np.linalg.solve(WQ_in_high, e_n_high) # (n_remains, n_channels)
+                    zeta_hat_in_high = np.linalg.solve(Q_in_high, gamma_in_high) # (n_remains, n_channels)
+                    eta_in_high = np.squeeze(zeta_in_high[:, np.newaxis, :].conj() @ Q_in_high @ zeta_in_high[:, :, np.newaxis], axis=(1, 2)) # (n_remains,)
+                    eta_hat_in_high = np.squeeze(zeta_in_high[:, np.newaxis, :].conj() @ Q_in_high @ zeta_hat_in_high[:, :, np.newaxis], axis=(1, 2)) # (n_remains,)
+
+                    eta_in_high[np.abs(eta_in_high) < eps] = eps
+                    condition_if_high = np.abs(eta_hat_in_high) < eps
+                    eta_hat_in_high[condition_if_high] = eps
+                    weight_high = (eta_hat_in_high / (2 * eta_in_high)) * (1 - np.sqrt(1 + 4 * eta_in_high / (np.abs(eta_hat_in_high)**2)))
+                    weight_if_high = 1 / np.sqrt(eta_in_high)
+                    weight_high[condition_if_high] = weight_if_high[condition_if_high]
+                    w_in_high = weight_high[:, np.newaxis] * zeta_in_high - zeta_hat_in_high
+                    W_high[:, neighbor_idx, source_idx, :] = w_in_high.conj()
             
-            W_Hermite = W_Hermite.reshape(n_bins, n_sources, n_channels)
+            W_low, W_high = W_low.reshape((n_blocks - n_remains) * n_neighbors, n_sources, n_channels), W_high.reshape(n_remains * (n_neighbors + 1), n_sources, n_channels)
+            W = np.concatenate([W_low, W_high], axis=0) # (n_bins, n_sources, n_channels)
         else:
-            raise NotImplementedError
+            W = W.reshape(n_blocks, n_neighbors, n_sources, n_channels)
+            X = X.reshape(n_blocks, n_neighbors, n_frames, n_channels)
+            U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors)
 
-        self.demix_filter = W_Hermite
+            XX = X[:, :, :, :, np.newaxis] * X[:, :, :, np.newaxis, :].conj() # (n_blocks, n_neighbors, n_frames, n_channels, n_channels)
+            XX = to_PSD(XX, eps=eps)
+
+            mask = 1 - np.eye(n_neighbors) # (n_neighbors, n_neighbors)
+            E = np.tile(np.eye(n_sources, n_channels), reps=(n_blocks, 1, 1)) # (n_blocks, n_neighbors, n_sources, n_channels)
+
+            for source_idx in range(n_sources):
+                e_n = E[:, source_idx, :] # (n_blocks, n_channels)
+
+                U_n, V_n = U[source_idx, :, :, :, :], V[source_idx, :] # (n_basis, n_blocks, n_neighbors', n_neighbors), (n_basis, n_frames)
+                R_n = np.sum(U_n[:, np.newaxis, :, :, :] * V_n[:, :, np.newaxis, np.newaxis, np.newaxis], axis=0) # (n_frames, n_blocks, n_neighbors', n_neighbors)
+                R_n = to_PSD(R_n, axis1=2, axis2=3, eps=eps)
+
+                inv_R_n = np.linalg.inv(R_n) # (n_frames, n_blocks, n_neighbors', n_neighbors)
+                inv_R_n = to_PSD(inv_R_n, eps=eps)
+                inv_R_n = inv_R_n.transpose(1, 3, 2, 0) # (n_blocks, n_neighbors, n_neighbors', n_frames)
+                inv_R_ii_n = np.diagonal(inv_R_n, axis1=1, axis2=2).real # (n_blocks, n_frames, n_neighbors)
+                inv_R_ii_n = inv_R_ii_n.transpose(0, 2, 1) # (n_blocks, n_neighbors, n_frames)
+
+                for neighbor_idx in range(n_neighbors):
+                    w_n = W[:, :, source_idx, :].conj() # (n_blocks, n_neighbors', n_channels)
+                    Xw_n = np.sum(X.conj() * w_n[:, :, np.newaxis, :], axis=3) # (n_blocks, n_neighbors', n_frames)
+
+                    Q_in = inv_R_ii_n[:, neighbor_idx, :, np.newaxis, np.newaxis] * XX[:, neighbor_idx, :, :, :] # (n_blocks, n_frames, n_channels, n_channels)
+                    Q_in = Q_in.mean(axis=1) # (n_blocks, n_channels, n_channels)
+                    Q_in = to_PSD(Q_in, eps=eps)
+
+                    XXw_n = X[:, neighbor_idx, np.newaxis, :, :] * Xw_n[:, :, :, np.newaxis] # (n_blocks, n_neighbors', n_frames, n_channels)
+                    RXXw_n = np.mean(inv_R_n[:, neighbor_idx, :, :, np.newaxis] * XXw_n, axis=2) # (n_blocks, n_neighbors', n_channels)
+                    gamma_in = np.sum(mask[np.newaxis, neighbor_idx, :, np.newaxis] * RXXw_n, axis=1) # (n_blocks, n_channels)
+
+                    WQ_in = W[:, neighbor_idx, :, :] @ Q_in # (n_blocks, n_sources, n_channels)
+                    zeta_in = np.linalg.solve(WQ_in, e_n) # (n_blocks, n_channels)
+                    zeta_hat_in = np.linalg.solve(Q_in, gamma_in) # (n_blocks, n_channels)
+                    eta_in = np.squeeze(zeta_in[:, np.newaxis, :].conj() @ Q_in @ zeta_in[:, :, np.newaxis], axis=(1, 2)) # (n_blocks,)
+                    eta_hat_in = np.squeeze(zeta_in[:, np.newaxis, :].conj() @ Q_in @ zeta_hat_in[:, :, np.newaxis], axis=(1, 2)) # (n_blocks,)
+
+                    eta_in[np.abs(eta_in) < eps] = eps
+                    condition_if = np.abs(eta_hat_in) < eps
+                    eta_hat_in[condition_if] = eps
+                    weight = (eta_hat_in / (2 * eta_in)) * (1 - np.sqrt(1 + 4 * eta_in / (np.abs(eta_hat_in)**2)))
+                    weight_if = 1 / np.sqrt(eta_in)
+                    weight[condition_if] = weight_if[condition_if]
+                    w_in = weight[:, np.newaxis] * zeta_in - zeta_hat_in
+                    W[:, neighbor_idx, source_idx, :] = w_in.conj()
+            
+            W = W.reshape(n_bins, n_sources, n_channels)
+        
+        self.demix_filter = W
 
     def compute_negative_loglikelihood(self):
         if self.author.lower() in __authors_ipsdta__:
-            loss = self.compute_negative_loglikelihood_block()
+            loss = self.compute_negative_loglikelihood_block_diagonal()
         else:
             raise ValueError("Not support {}'s IPSDTA.".format(self.author))
 
         return loss
 
-    def compute_negative_loglikelihood_block(self):
+    def compute_negative_loglikelihood_block_diagonal(self):
         n_frames = self.n_frames
         n_sources = self.n_sources
         n_blocks, n_neighbors = self.n_blocks, self.n_neighbors
@@ -952,15 +1040,19 @@ class GaussIPSDTA(IPSDTAbase):
             y_low = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
             y_high = y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1, 1) # (n_sources, n_frames, 1, n_neighbors + 1, 1)
 
-            inv_R_low, inv_R_high = np.linalg.inv(R_low + eps * np.eye(n_neighbors)), np.linalg.inv(R_high + eps * np.eye(n_neighbors + 1)) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1s, n_neighbors + n_remains)
+            inv_R_low, inv_R_high = np.linalg.inv(R_low), np.linalg.inv(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1s, n_neighbors + n_remains)
+            inv_R_low, inv_R_high = to_PSD(inv_R_low, eps=eps), to_PSD(inv_R_high, eps=eps)
             Ry_low = inv_R_low @ y_low # (n_sources, n_frames, n_blocks - n_remains, n_neighbors, 1)
             Ry_high = inv_R_high @ y_high # (n_sources, n_frames, n_remains, n_neighbors + 1, 1)
             Ry_low = Ry_low.reshape(n_sources, n_frames, (n_blocks - n_remains) * n_neighbors)
             Ry_high = Ry_high.reshape(n_sources, n_frames, n_remains * (n_neighbors + 1))
             Ry = np.concatenate([Ry_low, Ry_high], axis=2) # (n_sources, n_frames, n_bins)
 
-            det_low, det_high = np.linalg.det(R_low).real, np.linalg.det(R_high).real # (n_sources, n_frames, n_blocks - n_remains), # (n_sources, n_frames, n_remains)
-            det = np.concatenate([det_low, det_high], axis=2) # (n_sources, n_frames, n_blocks)
+            eigvals_low, eigvals_high = np.linalg.eigvalsh(R_low), np.linalg.eigvalsh(R_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1)
+            eigvals_low[eigvals_low < eps], eigvals_high[eigvals_high < eps] = eps, eps
+            logdet_low, logdet_high = np.log(eigvals_low), np.log(eigvals_high) # (n_sources, n_frames, n_blocks - n_remains, n_neighbors), (n_sources, n_frames, n_remains, n_neighbors + 1)
+            logdet_low, logdet_high = logdet_low.sum(axis=3), logdet_high.sum(axis=3) # (n_sources, n_frames, n_blocks - n_remains), (n_sources, n_frames, n_remains)
+            logdet_R = np.concatenate([logdet_low, logdet_high], axis=2)# (n_sources, n_frames, n_blocks)
         else:
             U = U.transpose(0, 4, 1, 2, 3) # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
             R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
@@ -969,18 +1061,27 @@ class GaussIPSDTA(IPSDTAbase):
             R = to_PSD(R, axis1=3, axis2=4)
             y = y.reshape(n_sources, n_frames, n_blocks, n_neighbors, 1) # (n_sources, n_frames, n_blocks, n_neighbors, 1)
 
-            inv_R = np.linalg.inv(R + eps * np.eye(n_neighbors)) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = to_PSD(inv_R, eps=eps)
             Ry = inv_R @ y # (n_sources, n_frames, n_blocks, n_neighbors, 1)
             Ry = Ry.reshape(n_sources, n_frames, n_blocks * n_neighbors)
 
-            det = np.linalg.det(R).real # (n_sources, n_frames, n_blocks)
+            eigvals = np.linalg.eigvalsh(R) # (n_sources, n_frames, n_blocks, n_neighbors)
+            eigvals[eigvals < eps] = eps
+            logdet_R = np.log(eigvals) # (n_sources, n_frames, n_blocks, n_neighbors)
+            logdet_R = logdet_R.sum(axis=3) # (n_sources, n_frames, n_blocks)
+        
+        logdet_R = logdet_R.sum(axis=2) # (n_sources, n_frames)
+        
+        eigvals = np.linalg.eigvals(W_Hermite) # (n_bins, n_sources)
+        eigvals = np.abs(eigvals)
+        eigvals[eigvals < eps] = eps
+        logdet_W = np.log(eigvals)
+        logdet_W = logdet_W.sum(axis=1) # (n_bins,)
 
-        # det[det < eps] = eps
-        logdet = np.sum(np.log(det), axis=2) # (n_sources, n_frames)
-
-        Y_Hermite = Y.conj()
-        yRy = np.sum(Y_Hermite * Ry, axis=2).real # (n_sources, n_frames)
-        loss = np.sum(yRy + logdet) - 2 * n_frames * np.sum(np.log(np.abs(np.linalg.det(W_Hermite))))
+        y_Hermite = Y.conj()
+        yRy = np.sum(y_Hermite * Ry, axis=2).real # (n_sources, n_frames)
+        loss = np.sum(yRy + logdet_R) - 2 * n_frames * logdet_W.sum()
 
         return loss
 
