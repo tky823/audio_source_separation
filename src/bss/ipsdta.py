@@ -162,7 +162,7 @@ class GaussIPSDTA(IPSDTAbase):
             https://ieeexplore.ieee.org/document/8553546
             https://ieeexplore.ieee.org/document/9054150
     """
-    def __init__(self, n_basis=10, spatial_iteration=None, normalize=True, callbacks=None, reference_id=0, author='Ikeshita', recordable_loss=True, eps=EPS, **kwargs):
+    def __init__(self, n_basis=10, spatial_iteration=None, normalize=True, callbacks=None, reference_id=0, author='Kondo', recordable_loss=True, eps=EPS, **kwargs):
         """
         Args:
             n_basis <int>: Number of basis matrices
