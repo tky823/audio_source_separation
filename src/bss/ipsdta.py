@@ -1809,7 +1809,7 @@ def _test_conv():
         mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_indices=mic_indices, samples=samples)
         write_wav(wav_path, mixed_signal.T, sr=sr)
 
-def _test_gauss_ipsdta(n_basis=10):
+def _test_gauss_ipsdta(n_basis=10, author='Ikeshita'):
     np.random.seed(111)
     
     # Room impulse response
@@ -1844,13 +1844,57 @@ def _test_gauss_ipsdta(n_basis=10):
 
     for idx in range(n_channels):
         _estimated_signal = estimated_signal[idx]
-        write_wav("data/IPSDTA/GaussIPSDTA/partitioning0/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=sr)
+        write_wav("data/IPSDTA/GaussIPSDTA-{}/partitioning0/mixture-{}_estimated-iter{}-{}.wav".format(author, sr, iteration, idx), signal=_estimated_signal, sr=sr)
     
     plt.figure()
     plt.plot(ipsdta.loss, color='black')
     plt.xlabel('Iteration')
     plt.ylabel('Loss')
-    plt.savefig('data/IPSDTA/GaussIPSDTA/partitioning0/loss.png', bbox_inches='tight')
+    plt.savefig('data/IPSDTA/GaussIPSDTA-{}/partitioning0/loss.png'.format(author), bbox_inches='tight')
+    plt.close()
+
+def _test_t_ipsdta(n_basis=10):
+    np.random.seed(111)
+    
+    # Room impulse response
+    sr = 16000
+    reverb = 0.16
+    duration = 0.5
+    samples = int(duration * sr)
+    mic_intervals = [8, 8, 8, 8, 8, 8, 8]
+    mic_indices = [2, 5]
+    degrees = [60, 300]
+    titles = ['man-16000', 'woman-16000']
+
+    mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
+
+    n_sources, T = mixed_signal.shape
+    
+    # STFT
+    fft_size, hop_size = 2048, 1024
+    mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
+
+    # IPSDTA
+    n_channels = len(titles)
+    iteration = 50
+
+    ipsdta = tIPSDTA(n_basis=n_basis)
+    print(ipsdta)
+    estimation = ipsdta(mixture, iteration=iteration)
+
+    estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
+    
+    print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
+
+    for idx in range(n_channels):
+        _estimated_signal = estimated_signal[idx]
+        write_wav("data/IPSDTA/tIPSDTA/partitioning0/mixture-{}_estimated-iter{}-{}.wav".format(sr, iteration, idx), signal=_estimated_signal, sr=sr)
+    
+    plt.figure()
+    plt.plot(ipsdta.loss, color='black')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.savefig('data/IPSDTA/tIPSDTA/partitioning0/loss.png', bbox_inches='tight')
     plt.close()
 
 if __name__ == '__main__':
@@ -1865,7 +1909,9 @@ if __name__ == '__main__':
     plt.rcParams['figure.dpi'] = 200
 
     os.makedirs("data/multi-channel", exist_ok=True)
-    os.makedirs("data/ILRMA/GaussIPSDTA/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/GaussIPSDTA-Ikeshita/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/GaussIPSDTA-Kondo/partitioning0", exist_ok=True)
+    os.makedirs("data/ILRMA/tIPSDTA/partitioning0", exist_ok=True)
 
     """
     Use multichannel room impulse response database.
@@ -1875,5 +1921,14 @@ if __name__ == '__main__':
     _test_conv()
 
     print("="*10, "Gauss-IPSDTA", "="*10)
-    _test_gauss_ipsdta(n_basis=2)
+    print("-"*10, "Ikeshita's Gauss-IPSDTA", "-"*10)
+    _test_gauss_ipsdta(n_basis=2, author='Ikeshita')
+    print()
+
+    print("-"*10, "Kondo's Gauss-IPSDTA", "-"*10)
+    _test_gauss_ipsdta(n_basis=2, author='Kondo')
+    print()
+
+    print("="*10, "t-IPSDTA", "="*10)
+    _test_t_ipsdta(n_basis=2)
     print()
