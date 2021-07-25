@@ -183,11 +183,15 @@ class GaussIPSDTA(IPSDTAbase):
                     raise ValueError("Invalid keywords.")
                 for key in __kwargs_ikeshita_ipsdta__.keys():
                     setattr(self, key, __kwargs_ikeshita_ipsdta__[key])
+                self.algorithm_source = 'em'
+                self.algorithm_spatial = 'fixed-point'
             elif author.lower() == 'kondo':
                 if set(kwargs) - set(__kwargs_kondo_ipsdta__) != set():
                     raise ValueError("Invalid keywords.")
                 for key in __kwargs_kondo_ipsdta__.keys():
                     setattr(self, key, __kwargs_kondo_ipsdta__[key])
+                self.algorithm_source = 'mm'
+                self.algorithm_spatial = 'VCD'
             for key in kwargs.keys():
                 setattr(self, key, kwargs[key])
         else:
@@ -318,21 +322,12 @@ class GaussIPSDTA(IPSDTAbase):
                 V = V * trace[:, :, np.newaxis]
 
             self.basis, self.activation = U, V
-
-        if self.author.lower() == 'ikeshita':
-            self.algorithm_source = 'em'
-            self.algorithm_spatial = 'fixed-point'
-
+        
+        if self.algorithm_spatial == 'fixed-point':
             if not hasattr(self, 'fixed_point'):
                 self.fixed_point = np.ones((n_sources, n_bins), dtype=np.complex128)
             else:
                 self.fixed_point = self.fixed_point.copy()
-        
-        elif self.author.lower() == 'kondo':
-            self.algorithm_source = 'mm'
-            self.algorithm_spatial = 'VCD'
-        else:
-            raise ValueError("Not support {}'s IPSDTA.".format(self.author))
 
     def __repr__(self):
         s = "Gauss-IPSDTA("
