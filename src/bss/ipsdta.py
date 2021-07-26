@@ -241,7 +241,7 @@ class GaussIPSDTA(IPSDTAbase):
 
         for key in kwargs.keys():
             setattr(self, key, kwargs[key])
-        
+
         if self.author.lower() in __authors_ipsdta__:
             self._reset_block_diagonal(**kwargs)
     
@@ -1524,8 +1524,8 @@ class tIPSDTA(IPSDTAbase):
                     Xw_n_high = np.sum(X_high.conj() * w_n_high[:, :, np.newaxis, :], axis=3) # (n_remains, n_neighbors' + 1, n_frames)
 
                     y_n_low, y_n_high = Xw_n_low, Xw_n_high # (n_blocks - n_remains, n_neighbors, n_frames), (n_remains, n_neighbors + 1, n_frames)
-                    Ry_n_low = np.sum(inv_R_n_low * y_n_low[:, :, np.newaxis, :], axis=2) # (n_blocks - n_remains, n_neighbors, n_frames)
-                    Ry_n_high = np.sum(inv_R_n_high * y_n_high[:, :, np.newaxis, :], axis=2) # (n_remains, n_neighbors + 1, n_frames)
+                    Ry_n_low = np.sum(inv_R_n_low * y_n_low[:, np.newaxis, :, :], axis=2) # (n_blocks - n_remains, n_neighbors, n_frames)
+                    Ry_n_high = np.sum(inv_R_n_high * y_n_high[:, np.newaxis, :, :], axis=2) # (n_remains, n_neighbors + 1, n_frames)
                     yRy_n_low = np.sum(y_n_low.conj() * Ry_n_low, axis=(0, 1)).real # (n_frames,)
                     yRy_n_high = np.sum(y_n_high.conj() * Ry_n_high, axis=(0, 1)).real # (n_frames,)
                     yRy_n = yRy_n_low + yRy_n_high # (n_frames,)
@@ -1560,10 +1560,11 @@ class tIPSDTA(IPSDTAbase):
                     Xw_n_high = np.sum(X_high.conj() * w_n_high[:, :, np.newaxis, :], axis=3) # (n_remains, n_neighbors' + 1, n_frames)
 
                     y_n_low, y_n_high = Xw_n_low, Xw_n_high # (n_blocks - n_remains, n_neighbors, n_frames), (n_remains, n_neighbors + 1, n_frames)
-                    Ry_n_low = np.sum(inv_R_n_low * y_n_low[:, :, np.newaxis, :], axis=2) # (n_blocks - n_remains, n_neighbors, n_frames)
-                    Ry_n_high = np.sum(inv_R_n_high * y_n_high[:, :, np.newaxis, :], axis=2) # (n_remains, n_neighbors + 1, n_frames)
+                    Ry_n_low = np.sum(inv_R_n_low * y_n_low[:, np.newaxis, :, :], axis=2) # (n_blocks - n_remains, n_neighbors, n_frames)
+                    Ry_n_high = np.sum(inv_R_n_high * y_n_high[:, np.newaxis, :, :], axis=2) # (n_remains, n_neighbors + 1, n_frames)
                     yRy_n_low = np.sum(y_n_low.conj() * Ry_n_low, axis=(0, 1)).real # (n_frames,)
                     yRy_n_high = np.sum(y_n_high.conj() * Ry_n_high, axis=(0, 1)).real # (n_frames,)
+
                     yRy_n = yRy_n_low + yRy_n_high # (n_frames,)
                     pi_n = (nu + 2 * n_bins) / (nu + 2 * yRy_n) # (n_frames,)
 
@@ -1621,7 +1622,7 @@ class tIPSDTA(IPSDTAbase):
                     Xw_n = np.sum(X.conj() * w_n[:, :, np.newaxis, :], axis=3) # (n_blocks, n_neighbors', n_frames)
 
                     y_n = Xw_n # (n_blocks, n_neighbors, n_frames)
-                    Ry_n = np.sum(inv_R_n * y_n[:, :, np.newaxis, :], axis=2) # (n_blocks, n_neighbors, n_frames)
+                    Ry_n = np.sum(inv_R_n * y_n[:, np.newaxis, :, :], axis=2) # (n_blocks, n_neighbors, n_frames) # Here
                     yRy_n = np.sum(y_n.conj() * Ry_n, axis=(0, 1)).real # (n_frames,)
                     pi_n = (nu + 2 * n_bins) / (nu + 2 * yRy_n) # (n_frames,)
 
