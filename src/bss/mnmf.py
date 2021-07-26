@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 
 from algorithm.linalg import solve_Riccati
-from criterion.divergence import multichannel_is_divergence
+from criterion.divergence import logdet_divergence
 
 EPS=1e-12
 THRESHOLD=1e+12
@@ -497,7 +497,7 @@ class MultichannelISNMF(MultichannelNMFbase):
         X = self.covariance_input # (n_bins, n_frames, n_channels, n_channels)
         X_hat = self.reconstruct_covariance()
         
-        loss = multichannel_is_divergence(X_hat, X) # (n_bins, n_frames)
+        loss = logdet_divergence(X_hat, X) # (n_bins, n_frames)
         loss = loss.sum()
 
         return loss
