@@ -502,7 +502,7 @@ class MultichannelISNMF(MultichannelNMFbase):
         X_hat = self.reconstruct_covariance()
 
         X, X_hat = to_PSD(X), to_PSD(X_hat)
-        X = X + eps * np.eye(n_channels)
+        X, X_hat = X + eps * np.eye(n_channels), X_hat + eps * np.eye(n_channels)
         
         loss = logdet_divergence(X_hat, X) # (n_bins, n_frames)
         loss = loss.sum()
