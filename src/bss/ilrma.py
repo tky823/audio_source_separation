@@ -1,7 +1,8 @@
 import warnings
 import numpy as np
 
-from algorithm.stft import stft, istft
+from utils.utils_linalg import parallel_sort
+from transform.stft import stft, istft
 from algorithm.projection_back import projection_back
 
 EPS=1e-12
@@ -612,7 +613,7 @@ class GaussILRMA(ILRMAbase):
         eig_values, v = np.linalg.eig(VV) # (n_bins, 2), # (n_bins, 2, 2)
         order = np.argsort(eig_values, axis=-1)[:, ::-1] # (n_bins, 2)
         v_transpose = v.swapaxes(-2, -1)
-        v_mn = _parallel_sort(v_transpose, order=order, axis=-2)
+        v_mn = parallel_sort(v_transpose, order=order, axis=-2)
         v_m, v_n = np.split(v_mn, 2, axis=1) # (n_bins, 1, 2), (n_bins, 1, 2)
         v_m, v_n = v_m.squeeze(axis=1), v_n.squeeze(axis=1)
         vUv_m, vUv_n = v_m[:, np.newaxis, :].conj() @ V_m @ v_m[:, :, np.newaxis], v_n[:, np.newaxis, :].conj() @ V_n @ v_n[:, :, np.newaxis]
@@ -1230,29 +1231,6 @@ class ConsistentGaussILRMA(GaussILRMA):
 
         if self.demix_filter is not None:
             self.demix_filter = W
-
-def _parallel_sort(x, order, axis=-2):
-    """
-    Args:
-        x: (*, n_elements, *)
-        order: (*, order_elements)
-        axis <int>
-    Returns:
-        x_sorted: (*, n_elements, *)
-    """
-    repeats = np.prod(x.shape[:axis])
-    n_elements = x.shape[axis]
-    tensor_shape = x.shape[axis+1:]
-    order_elements = order.shape[-1]
-
-    x_flatten = x.reshape(-1, *tensor_shape)
-    order_flatten = order.reshape(-1)
-    tmp = n_elements * np.arange(repeats) # 2049 * np.arange(2049)
-    shift = np.repeat(tmp, order_elements)
-    x_sorted = x_flatten[order_flatten + shift]
-    x_sorted = x_sorted.reshape(*x.shape[:axis], order_elements, *tensor_shape)
-
-    return x_sorted
 
 def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8,8], mic_indices=[0], samples=None):
     intervals = '-'.join([str(interval) for interval in mic_intervals])
