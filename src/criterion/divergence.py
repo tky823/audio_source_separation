@@ -99,7 +99,7 @@ def logdet_divergence(input, target, eps=EPS):
     eigvals_X, eigvals_Y = np.linalg.eigvalsh(target).real, np.linalg.eigvalsh(input).real
     eigvals_X[eigvals_X < eps], eigvals_Y[eigvals_Y < eps] = eps, eps
 
-    logdet = np.sum(np.log(eigvals_X), axis=1) - np.sum(np.log(eigvals_Y), axis=1)
+    logdet = np.sum(np.log(eigvals_X), axis=-1) - np.sum(np.log(eigvals_Y), axis=-1)
 
     loss = trace - logdet - n_channels
 

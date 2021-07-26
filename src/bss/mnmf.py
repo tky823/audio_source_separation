@@ -2,6 +2,7 @@ import warnings
 
 import numpy as np
 
+from utils.utils_linalg import to_PSD
 from algorithm.linalg import solve_Riccati
 from criterion.divergence import logdet_divergence
 
@@ -494,8 +495,14 @@ class MultichannelISNMF(MultichannelNMFbase):
         return loss
     
     def compute_negative_loglikelihood_sawada(self):
+        n_channels = self.n_channels
+        eps = self.eps
+
         X = self.covariance_input # (n_bins, n_frames, n_channels, n_channels)
         X_hat = self.reconstruct_covariance()
+
+        X, X_hat = to_PSD(X), to_PSD(X_hat)
+        X = X + eps * np.eye(n_channels)
         
         loss = logdet_divergence(X_hat, X) # (n_bins, n_frames)
         loss = loss.sum()
