@@ -432,7 +432,7 @@ class GaussIPSDTA(IPSDTAbase):
         n_sources = self.n_sources
         eps = self.eps
 
-        def _compute_trace_factor(estimation, basis, activation):
+        def _update_activation_factor(estimation, basis, activation):
             """
             Args:
                 estimation: (n_sources, n_frames, n_blocks, n_neighbors)
@@ -479,13 +479,13 @@ class GaussIPSDTA(IPSDTAbase):
             U_low, U_high = U
             Y_low, Y_high = np.split(Y, [(n_blocks - n_remains) * n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
             
-            trace_low, U_low = _compute_trace_factor(Y_low, basis=U_low, activation=V)
-            trace_high, U_high = _compute_trace_factor(Y_high, basis=U_high, activation=V)
+            trace_low, U_low = _update_activation_factor(Y_low, basis=U_low, activation=V)
+            trace_high, U_high = _update_activation_factor(Y_high, basis=U_high, activation=V)
             trace = np.concatenate([trace_low, trace_high], axis=3)
 
             U = U_low, U_high
         else:
-            trace, U = _compute_trace_factor(Y, basis=U, activation=V)
+            trace, U = _update_activation_factor(Y, basis=U, activation=V)
         
         trace[trace < 0] = 0
         trace = np.sum(trace, axis=3) # (n_sources, n_basis, n_frames)
@@ -586,15 +586,16 @@ class GaussIPSDTA(IPSDTAbase):
             _, n_blocks, n_neighbors, _, _ = basis.shape
 
             U, V = basis.transpose(0, 4, 1, 2, 3), activation # (n_sources, n_basis, n_blocks, n_neighbors, n_neighbors)
+            
             R = np.sum(U[:, :, np.newaxis, :, :, :] * V[:, :, :, np.newaxis, np.newaxis, np.newaxis], axis=1) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             R = to_PSD(R, eps=eps)
+            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
+            inv_R = to_PSD(inv_R, eps=eps)
 
-            y = estimation.reshape(n_sources, n_frames, n_blocks, n_neighbors)
+            y = estimation
             yy = y[:, :, :, :, np.newaxis] * y[:, :, :, np.newaxis, :].conj() + eps * np.eye(n_neighbors) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             yy = to_PSD(yy, eps=eps)
 
-            inv_R = np.linalg.inv(R) # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
-            inv_R = to_PSD(inv_R, eps=eps)
             Ryy = inv_R @ yy # (n_sources, n_frames, n_blocks, n_neighbors, n_neighbors)
             RU = inv_R[:, np.newaxis, :, :, :, :] @ U[:, :, np.newaxis, :, :, :] # (n_sources, n_basis, n_frames, n_blocks, n_neighbors, n_neighbors)
             
@@ -618,6 +619,7 @@ class GaussIPSDTA(IPSDTAbase):
         if n_remains > 0:
             U_low, U_high = U
             y_low, y_high = np.split(Y, [(n_blocks - n_remains)* n_neighbors], axis=2) # (n_sources, n_frames, (n_blocks - n_remains) * n_neighbors), (n_sources, n_frames, n_remains * (n_neighbors + 1))
+            y_low, y_high = y_low.reshape(n_sources, n_frames, n_blocks - n_remains, n_neighbors), y_high.reshape(n_sources, n_frames, n_remains, n_neighbors + 1)
 
             numerator_low, denominator_low, U_low, V = _update_activation_factor(y_low, basis=U_low, activation=V)
             numerator_high, denominator_high, U_high, V = _update_activation_factor(y_high, basis=U_high, activation=V)
@@ -627,7 +629,8 @@ class GaussIPSDTA(IPSDTAbase):
 
             U = U_low, U_high # (n_sources, n_blocks - n_remains, n_neighbors, n_neighbors, n_basis), (n_sources, n_remains, n_neighbors + 1, n_neighbors + 1, n_basis)
         else:
-            numerator, denominator, U, V = _update_activation_factor(Y, basis=U, activation=V)
+            y = Y.reshape(n_sources, n_frames, n_blocks, n_neighbors) # (n_sources, n_frames, n_blocks, n_neighbors)
+            numerator, denominator, U, V = _update_activation_factor(y, basis=U, activation=V)
         
         numerator, denominator = np.sum(numerator, axis=3), np.sum(denominator, axis=3) # (n_sources, n_basis, n_frames), (n_sources, n_basis, n_frames)
         numerator[numerator < 0] = 0
