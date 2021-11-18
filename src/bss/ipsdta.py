@@ -1,6 +1,6 @@
 import numpy as np
 
-from utils.utils_linalg import to_PSD
+from utils.linalg import to_PSD
 from algorithm.projection_back import projection_back
 
 EPS = 1e-12

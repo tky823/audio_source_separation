@@ -2,7 +2,7 @@ import numpy as np
 import scipy.sparse as sci_sparse
 
 from bss.prox import PDSBSSbase
-from utils.utils_linalg import parallel_sort
+from utils.linalg import parallel_sort
 from algorithm.projection_back import projection_back
 
 EPS = 1e-12

@@ -3,7 +3,7 @@ import numpy as np
 from criterion.divergence import generalized_kl_divergence, is_divergence, multichannel_is_divergence
 from algorithm.linalg import solve_Riccati
 
-EPS=1e-12
+EPS = 1e-12
 
 __metrics__ = ['EUC', 'KL', 'IS']
 

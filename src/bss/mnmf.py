@@ -2,12 +2,12 @@ import warnings
 
 import numpy as np
 
-from utils.utils_linalg import to_PSD
+from utils.linalg import to_PSD
 from algorithm.linalg import solve_Riccati
 from criterion.divergence import logdet_divergence
 
-EPS=1e-12
-THRESHOLD=1e+12
+EPS = 1e-12
+THRESHOLD = 1e+12
 
 __metrics__ = ['EUC', 'KL', 'IS']
 __authors__ = ['sawada', 'ozerov']

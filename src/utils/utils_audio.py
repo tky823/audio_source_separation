@@ -13,6 +13,7 @@ def write_wav(path, signal, sr, channel_last=True):
 
     if not signal.ndim in [1, 2]:
         raise ValueError("Only support 1D or 2D input.")
+    
     if signal.ndim == 2 and not channel_last:
         signal = signal.transpose()
     wavfile.write(path, sr, signal)

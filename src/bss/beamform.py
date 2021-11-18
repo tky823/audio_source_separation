@@ -1,6 +1,6 @@
 import numpy as np
 
-EPS=1e-12
+EPS = 1e-12
 
 def delay_sum_beamform(input, steering_vector, reference_id=0):
     """

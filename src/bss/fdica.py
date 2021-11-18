@@ -1,9 +1,10 @@
-import numpy as np
 import itertools
+
+import numpy as np
 
 from algorithm.projection_back import projection_back
 
-EPS=1e-12
+EPS = 1e-12
 
 class FDICAbase:
     def __init__(self, callbacks=None, recordable_loss=True, eps=EPS):

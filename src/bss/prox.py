@@ -1,9 +1,7 @@
 import numpy as np
 import scipy.sparse as sci_sparse
 
-from algorithm.projection_back import projection_back
-
-EPS=1e-12
+EPS = 1e-12
 
 """
     Reference: "Determined Blind Source Separation via Proximal Splitting Algorithm"

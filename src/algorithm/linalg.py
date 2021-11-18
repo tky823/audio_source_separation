@@ -2,7 +2,7 @@ import numpy as np
 
 from utils.utils_linalg import parallel_sort
 
-EPS=1e-12
+EPS = 1e-12
 
 def solve_Riccati(A, B):
     """

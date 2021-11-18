@@ -1,11 +1,10 @@
 import numpy as np
 import torch
 
-from algorithm.stft import stft, istft
 from algorithm.projection_back import projection_back
 
-EPS=1e-12
-THRESHOLD=1e+12
+EPS = 1e-12
+THRESHOLD = 1e+12
 
 class IDLMAbase:
     def __init__(self, normalize=True, callback=None, dnn_flooring=1e-5, eps=EPS):
@@ -77,9 +76,9 @@ class IDLMAbase:
         Returns:
             output (n_channels, n_bins, n_frames): 
         """
-        input = input.transpose(1,0,2)
+        input = input.transpose(1, 0, 2)
         estimation = demix_filter @ input
-        output = estimation.transpose(1,0,2)
+        output = estimation.transpose(1, 0, 2)
 
         return output
     
@@ -140,6 +139,7 @@ class GaussIDLMA(IDLMAbase):
     def update_once(self, is_source_model_update=True):
         if is_source_model_update:
             self.update_source_model()
+
         self.update_space_model()
 
         X, W = self.input, self.demix_filter
@@ -150,9 +150,9 @@ class GaussIDLMA(IDLMAbase):
             if self.normalize == 'projection-back':
                 scale = projection_back(Y, reference=X[self.reference_id])
                 Y = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
-                X = X.transpose(1,0,2) # (n_bins, n_channels, n_frames)
-                X_Hermite = X.transpose(0,2,1).conj() # (n_bins, n_frames, n_channels)
-                W = Y.transpose(1,0,2) @ X_Hermite @ np.linalg.inv(X @ X_Hermite) # (n_bins, n_sources, n_channels)
+                X = X.transpose(1, 0, 2) # (n_bins, n_channels, n_frames)
+                X_Hermite = X.transpose(0, 2, 1).conj() # (n_bins, n_frames, n_channels)
+                W = Y.transpose(1, 0, 2) @ X_Hermite @ np.linalg.inv(X @ X_Hermite) # (n_bins, n_sources, n_channels)
             else:
                 raise ValueError("Not support normalization based on {}. Choose 'power' or 'projection-back'".format(self.normalize))
         else:
@@ -182,15 +182,15 @@ class GaussIDLMA(IDLMAbase):
         X, W = self.input, self.demix_filter
         R = self.dnn_output[...,np.newaxis, np.newaxis]**(2/domain)
         
-        X = X.transpose(1,2,0) # (n_bins, n_frames, n_channels)
+        X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
         X = X[...,np.newaxis]
-        X_Hermite = X.transpose(0,1,3,2).conj()
+        X_Hermite = X.transpose(0, 1, 3, 2).conj()
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
         R[R < eps] = eps
         U = XX / R
         U = U.mean(axis=2) # (n_sources, n_bins, n_channels, n_channels)
         E = np.eye(n_sources, n_channels)
-        E = np.tile(E, reps=(n_bins,1,1)) # (n_bins, n_sources, n_channels)
+        E = np.tile(E, reps=(n_bins, 1, 1)) # (n_bins, n_sources, n_channels)
 
         for source_idx in range(n_sources):
             # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)

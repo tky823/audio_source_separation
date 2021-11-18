@@ -1,6 +1,6 @@
 import numpy as np
 
-EPS=1e-12
+EPS = 1e-12
 
 def kl_divergence(input, target, eps=EPS):
     """

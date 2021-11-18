@@ -1,12 +1,12 @@
 import warnings
 import numpy as np
 
-from utils.utils_linalg import parallel_sort
+from utils.linalg import parallel_sort
 from transform.stft import stft, istft
 from algorithm.projection_back import projection_back
 
-EPS=1e-12
-THRESHOLD=1e+12
+EPS = 1e-12
+THRESHOLD = 1e+12
 
 __algorithms_spatial__ = ['IP', 'IVA', 'ISS', 'IPA', 'pairwise', 'IP1', 'IP2']
 

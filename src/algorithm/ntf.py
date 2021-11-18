@@ -3,7 +3,7 @@ Non-negative tensor factorization
 """
 import numpy as np
 
-EPS=1e-12
+EPS = 1e-12
 
 class NTFbase:
     def __init__(self, n_basis=2, eps=EPS):
