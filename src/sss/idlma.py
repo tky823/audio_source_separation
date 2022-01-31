@@ -131,7 +131,7 @@ class GaussIDLMA(IDLMAbase):
         Y = self.separate(X, demix_filter=W)
 
         scale = projection_back(Y, reference=X[reference_id])
-        output = Y * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
+        output = Y * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
         self.estimation = output
 
         return output
@@ -166,8 +166,7 @@ class GaussIDLMA(IDLMAbase):
         Y = self.separate(X, demix_filter=W)
         P = np.abs(Y)**2
 
-        dnn_output = self.estimate_by_dnn(P)
-        self.dnn_output = dnn_output
+        self.dnn_output = self.estimate_by_dnn(P)
 
         if self.dnn_flooring:
             self.floor_dnn_output()
@@ -180,10 +179,10 @@ class GaussIDLMA(IDLMAbase):
         eps, threshold = self.eps, self.threshold
 
         X, W = self.input, self.demix_filter
-        R = self.dnn_output[...,np.newaxis, np.newaxis]**(2/domain)
+        R = self.dnn_output[..., np.newaxis, np.newaxis]**(2 / domain)
         
         X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
-        X = X[...,np.newaxis]
+        X = X[..., np.newaxis]
         X_Hermite = X.transpose(0, 1, 3, 2).conj()
         XX = X @ X_Hermite # (n_bins, n_frames, n_channels, n_channels)
         R[R < eps] = eps
@@ -194,24 +193,24 @@ class GaussIDLMA(IDLMAbase):
 
         for source_idx in range(n_sources):
             # W: (n_bins, n_sources, n_channels), U: (n_sources, n_bins, n_channels, n_channels)
-            w_n_Hermite = W[:,source_idx,:] # (n_bins, n_channels)
+            w_n_Hermite = W[:, source_idx, :] # (n_bins, n_channels)
             U_n = U[source_idx] # (n_bins, n_channels, n_channels)
             WU = W @ U_n # (n_bins, n_sources, n_channels)
             condition = np.linalg.cond(WU) < threshold # (n_bins,)
             condition = condition[:,np.newaxis] # (n_bins, 1)
             e_n = E[:,source_idx,:]
             w_n = np.linalg.solve(WU, e_n)
-            wUw = w_n[:,np.newaxis,:].conj() @ U_n @ w_n[:,:,np.newaxis]
-            denominator = np.sqrt(wUw[...,0])
+            wUw = w_n[:, np.newaxis, :].conj() @ U_n @ w_n[:, :, np.newaxis]
+            denominator = np.sqrt(wUw[..., 0])
             w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
             # if condition number is too big, `denominator[denominator < eps] = eps` may diverge of cost function.
-            W[:,source_idx,:] = w_n_Hermite
+            W[:, source_idx, :] = w_n_Hermite
 
         self.demix_filter = W
     
     def estimate_by_dnn(self, input):
         domain = self.domain
-        input = input**(domain/2)
+        input = input**(domain / 2)
 
         with torch.no_grad():
             input = torch.Tensor(input)
@@ -220,7 +219,7 @@ class GaussIDLMA(IDLMAbase):
             output = self.dnn(input)
 
         output = output.cpu().numpy()
-        output = output**(2/domain)
+        output = output**(2 / domain)
 
         return output
     

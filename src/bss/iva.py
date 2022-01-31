@@ -110,9 +110,9 @@ class IVAbase:
         Returns:
             output (n_channels, n_bins, n_frames): 
         """
-        input = input.transpose(1,0,2)
+        input = input.transpose(1, 0, 2)
         estimation = demix_filter @ input
-        output = estimation.transpose(1,0,2)
+        output = estimation.transpose(1, 0, 2)
 
         return output
     
@@ -213,11 +213,11 @@ class GradLaplaceIVA(GradIVAbase):
         W = self.demix_filter
         Y = self.separate(X, demix_filter=W)
 
-        X_Hermite = X.transpose(1,2,0).conj() # (n_bins, n_frames, n_sources)
+        X_Hermite = X.transpose(1, 2, 0).conj() # (n_bins, n_frames, n_sources)
         W_inverse = np.linalg.inv(W)
-        W_inverseHermite = W_inverse.transpose(0,2,1).conj() # (n_bins, n_channels, n_sources)
+        W_inverseHermite = W_inverse.transpose(0, 2, 1).conj() # (n_bins, n_channels, n_sources)
 
-        Y = Y.transpose(1,0,2) # (n_bins, n_sources, n_frames)
+        Y = Y.transpose(1, 0, 2) # (n_bins, n_sources, n_frames)
         P = np.abs(Y)**2
         denominator = np.sqrt(P.sum(axis=0))
         denominator[denominator < eps] = eps
