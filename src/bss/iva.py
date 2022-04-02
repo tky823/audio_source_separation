@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import scipy.sparse as sci_sparse
 
@@ -8,15 +10,17 @@ from algorithm.projection_back import projection_back
 EPS = 1e-12
 THRESHOLD = 1e+12
 
-__algorithms_spatial__ = ['IP', 'IVA', 'ISS', 'IPA', 'pairwise', 'IP1', 'IP2']
+__algorithms_spatial__ = ['IP', 'IVA', 'ISS', 'IPA', 'pairwise', 'IP1', 'IP2', 'ISS1', 'ISS2']
 
 """
 References for `algorithm_spatial`:
     IP: "Stable and fast update rules for independent vector analysis based on auxiliary function technique"
-        same as `IP1`
+        same as `IP1`.
     ISS: "Fast and Stable Blind Source Separation with Rank-1 Updates"
+         same as `ISS1`.
     IPA:
     IP2:
+    ISS2
 """
 
 class IVAbase:
@@ -35,7 +39,7 @@ class IVAbase:
             self.loss = []
         else:
             self.loss = None
-    
+
     def _reset(self, **kwargs):
         assert self.input is not None, "Specify data!"
 
@@ -57,7 +61,7 @@ class IVAbase:
             W = self.demix_filter.copy()
             self.demix_filter = W
         self.estimation = self.separate(X, demix_filter=W)
-        
+
     def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
@@ -72,7 +76,7 @@ class IVAbase:
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
-        
+
         if self.callbacks is not None:
             for callback in self.callbacks:
                 callback(self)
@@ -83,16 +87,16 @@ class IVAbase:
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
-            
+
             if self.callbacks is not None:
                 for callback in self.callbacks:
                     callback(self)
-        
+
         X, W = input, self.demix_filter
         output = self.separate(X, demix_filter=W)
 
         return output
-    
+
     def __repr__(self):
         s = "IVA("
         s += ")"
@@ -101,7 +105,7 @@ class IVAbase:
 
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function")
-    
+
     def separate(self, input, demix_filter):
         """
         Args:
@@ -115,7 +119,7 @@ class IVAbase:
         output = estimation.transpose(1, 0, 2)
 
         return output
-    
+
     def compute_demix_filter(self, estimation, input):
         X, Y = input, estimation
         X_Hermite = X.transpose(1, 2, 0).conj()
@@ -123,9 +127,9 @@ class IVAbase:
         demix_filter = Y.transpose(1, 0, 2) @ X_Hermite @ np.linalg.inv(XX_Hermite)
 
         return demix_filter
-    
+
     def compute_negative_loglikelihood(self):
-        raise NotImplementedError("Implement 'compute_negative_loglikelihood' function.")
+        raise NotImplementedError("Implement 'compute_negative_loglikelihood' method.")
 
 class GradIVAbase(IVAbase):
     """
@@ -138,7 +142,7 @@ class GradIVAbase(IVAbase):
         self.lr = lr
         self.reference_id = reference_id
         self.apply_projection_back = apply_projection_back
-    
+
     def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
@@ -153,7 +157,7 @@ class GradIVAbase(IVAbase):
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
-        
+
         if self.callbacks is not None:
             for callback in self.callbacks:
                 callback(self)
@@ -164,7 +168,7 @@ class GradIVAbase(IVAbase):
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
                 self.loss.append(loss)
-            
+
             if self.callbacks is not None:
                 for callback in self.callbacks:
                     callback(self)
@@ -179,14 +183,14 @@ class GradIVAbase(IVAbase):
         self.estimation = output
 
         return output
-    
+
     def __repr__(self):
         s = "GradIVA("
         s += "lr={lr}"
         s += ")"
 
         return s.format(**self.__dict__)
-    
+
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function")
 
@@ -196,14 +200,14 @@ class GradIVAbase(IVAbase):
 class GradLaplaceIVA(GradIVAbase):
     def __init__(self, lr=1e-1, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
         super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps)
-    
+
     def __repr__(self):
         s = "NaturalGradIVA("
         s += "lr={lr}"
         s += ")"
 
         return s.format(**self.__dict__)
-    
+
     def update_once(self):
         n_frames = self.n_frames
         lr = self.lr
@@ -225,13 +229,13 @@ class GradLaplaceIVA(GradIVAbase):
 
         delta = (Phi @ X_Hermite) / n_frames - W_inverseHermite
         W = W - lr * delta # (n_bins, n_sources, n_channels)
-        
+
         X = self.input
         Y = self.separate(X, demix_filter=W)
 
         self.demix_filter = W
         self.estimation = Y
-    
+
     def compute_negative_loglikelihood(self):
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
@@ -243,7 +247,7 @@ class GradLaplaceIVA(GradIVAbase):
 class NaturalGradLaplaceIVA(GradIVAbase):
     def __init__(self, lr=1e-1, reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS):
         super().__init__(lr=lr, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps)
-    
+
     def __repr__(self):
         s = "NaturalGradLaplaceIVA("
         s += "lr={lr}"
@@ -271,13 +275,13 @@ class NaturalGradLaplaceIVA(GradIVAbase):
 
         delta = ((Phi @ Y_Hermite) / n_frames - eye) @ W
         W = W - lr * delta # (n_bins, n_sources, n_channels)
-        
+
         X = self.input
         Y = self.separate(X, demix_filter=W)
 
         self.demix_filter = W
         self.estimation = Y
-    
+
     def compute_negative_loglikelihood(self):
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
@@ -305,10 +309,13 @@ class AuxIVAbase(IVAbase):
 
         if not self.algorithm_spatial in __algorithms_spatial__:
             raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
-        
-        if self.algorithm_spatial in ['pairwise', 'IP2']:
+
+        if self.algorithm_spatial == 'pairwise':
+            warnings.warn("Use self.algorithm_spatial='IP2' instead of 'pairwise'.", DeprecationWarning)
+
+        if self.algorithm_spatial in ['pairwise', 'IP2', 'ISS2']:
             self.update_pair = None
-    
+
     def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
@@ -323,15 +330,15 @@ class AuxIVAbase(IVAbase):
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
-        
+
         if self.callbacks is not None:
             for callback in self.callbacks:
                 callback(self)
 
         for idx in range(iteration):
-            if self.algorithm_spatial in ['pairwise', 'IP2']:
+            if self.algorithm_spatial in ['pairwise', 'IP2', 'ISS2']:
                 self._select_update_pair()
-            
+
             self.update_once()
             if self.recordable_loss:
                 loss = self.compute_negative_loglikelihood()
@@ -348,27 +355,27 @@ class AuxIVAbase(IVAbase):
         if self.apply_projection_back:
             scale = projection_back(output, reference=X[reference_id])
             output = output * scale[...,np.newaxis] # (n_sources, n_bins, n_frames)
-        
+
         self.estimation = output
 
         return output
-    
+
     def _reset(self, **kwargs):
         super()._reset(**kwargs)
 
-        if self.algorithm_spatial == 'ISS':
+        if self.algorithm_spatial in ['ISS', 'ISS1']:
             self.demix_filter = None
-    
+
     def __repr__(self):
         s = "AuxIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
 
         return s.format(**self.__dict__)
-    
+
     def update_once(self):
         raise NotImplementedError("Implement 'update_once' function.")
-    
+
     def _select_update_pair(self):
         # For pairwise update
         n_sources = self.n_sources
@@ -403,24 +410,24 @@ class AuxLaplaceIVA(AuxIVAbase):
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
-        
+
         if self.callbacks is not None:
-            if self.algorithm_spatial == 'ISS':
+            if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
                 # In `update_once()`, demix_filter isn't updated
                 # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                 X, Y = self.input, self.estimation
                 self.demix_filter = self.compute_demix_filter(Y, X)
-            
+
             for callback in self.callbacks:
                 callback(self)
-            
-            if self.algorithm_spatial == 'ISS':
+
+            if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
                 self.demix_filter = None
 
         for idx in range(iteration):
-            if self.algorithm_spatial in ['pairwise', 'IP2']:
+            if self.algorithm_spatial in ['pairwise', 'IP2', 'ISS2']:
                 self._select_update_pair()
-            
+
             self.update_once()
 
             if self.recordable_loss:
@@ -428,56 +435,58 @@ class AuxLaplaceIVA(AuxIVAbase):
                 self.loss.append(loss)
 
             if self.callbacks is not None:
-                if self.algorithm_spatial == 'ISS':
+                if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
                     # In `update_once()`, demix_filter isn't updated
                     # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                     X, Y = self.input, self.estimation
                     self.demix_filter = self.compute_demix_filter(Y, X)
-                
+
                 for callback in self.callbacks:
                     callback(self)
-                
-                if self.algorithm_spatial == 'ISS':
+
+                if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
                     self.demix_filter = None
 
         reference_id = self.reference_id
 
-        if self.algorithm_spatial == 'ISS':
+        if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
             X, Y = self.input, self.estimation
             self.demix_filter = self.compute_demix_filter(Y, X)
         else:
             X, W = input, self.demix_filter
             Y = self.separate(X, demix_filter=W)
-        
+
         output = Y
 
         if self.apply_projection_back:
             scale = projection_back(output, reference=X[reference_id])
             output = output * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
-        
+
         self.estimation = output
 
         return output
-    
+
     def __repr__(self):
         s = "AuxLaplaceIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
 
         return s.format(**self.__dict__)
-    
+
     def update_once(self):
         if self.algorithm_spatial in ['IP', 'IP1']:
             self.update_once_ip()
-        elif self.algorithm_spatial == 'ISS':
+        elif self.algorithm_spatial in ['ISS', 'ISS1']:
             self.update_once_iss()
-        elif self.algorithm_spatial in ['pairwise', 'IP2']:
-            self.update_once_pairwise()
         elif self.algorithm_spatial == 'IPA':
             self.update_once_ipa()
+        elif self.algorithm_spatial in ['pairwise', 'IP2']:
+            self.update_once_ip2()
+        elif self.algorithm_spatial == 'ISS2':
+            self.update_once_iss2()
         else:
             raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
-    
+
     def update_once_ip(self):
         n_sources, n_channels = self.n_sources, self.n_channels
         n_bins = self.n_bins
@@ -514,14 +523,14 @@ class AuxLaplaceIVA(AuxIVAbase):
             w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
             # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
             W[:, n, :] = w_n_Hermite
-            
+
         self.demix_filter = W
 
         X = self.input
         Y = self.separate(X, demix_filter=W)
-        
+
         self.estimation = Y
-    
+
     def update_once_iss(self):
         n_sources = self.n_sources
         eps = self.eps
@@ -538,10 +547,13 @@ class AuxLaplaceIVA(AuxIVAbase):
             V_n = U_n / D_n # (n_sources, n_bins)
             V_n[n] = 1 - 1 / np.sqrt(D_n[n])
             Y = Y - V_n[:, :, np.newaxis] * Y[n]
-        
+
         self.estimation = Y
 
-    def update_once_pairwise(self):
+    def update_once_ipa(self):
+        raise ValueError("in progress...")
+
+    def update_once_ip2(self):
         n_channels = self.n_channels
         n_bins = self.n_bins
         eps, threshold = self.eps, self.threshold
@@ -554,7 +566,7 @@ class AuxLaplaceIVA(AuxIVAbase):
         P_m, P_n = np.abs(Y_m)**2, np.abs(Y_n)**2 # (n_bins, n_frames)
         R_m, R_n = np.sqrt(P_m.sum(axis=0)), np.sqrt(P_n.sum(axis=0)) # (n_frames,)
         R_m, R_n = R_m[np.newaxis, ..., np.newaxis, np.newaxis], R_n[np.newaxis, ..., np.newaxis, np.newaxis] # (1, n_frames, 1, 1)
-            
+
         X = X.transpose(1, 2, 0) # (n_bins, n_frames, n_channels)
         X = X[..., np.newaxis]
         X_Hermite = X.transpose(0, 1, 3, 2).conj()
@@ -566,7 +578,7 @@ class AuxLaplaceIVA(AuxIVAbase):
         e_m, e_n = np.zeros((n_bins, n_channels, 1)), np.zeros((n_bins, n_channels, 1))
         e_m[:, m, :], e_n[:, n, :] = 1, 1
         E_mn = np.concatenate([e_m, e_n], axis=2) # (n_bins, n_channels, 2)
-            
+
         WU_m, WU_n = W @ U_m, W @ U_n # (n_bins, n_channels, n_channels)
         condition_m, condition_n = np.linalg.cond(WU_m) < threshold, np.linalg.cond(WU_n) < threshold  # (n_bins,)
         condition_m, condition_n = condition_m[:, np.newaxis], condition_n[:, np.newaxis]
@@ -595,10 +607,10 @@ class AuxLaplaceIVA(AuxIVAbase):
 
         X = self.input
         Y = self.separate(X, demix_filter=W)
-        
+
         self.estimation = Y
-    
-    def update_once_ipa(self):
+
+    def update_once_iss2(self):
         raise ValueError("in progress...")
 
     def compute_negative_loglikelihood(self):
@@ -611,7 +623,7 @@ class AuxLaplaceIVA(AuxIVAbase):
         else:
             W = self.demix_filter
             Y = self.separate(X, demix_filter=W)
-        
+
         P = np.sum(np.abs(Y)**2, axis=1)
         R = 2 * np.sqrt(P)
         loss = R.sum() - 2 * n_frames * np.log(np.abs(np.linalg.det(W))).sum()
@@ -621,7 +633,7 @@ class AuxLaplaceIVA(AuxIVAbase):
 class AuxGaussIVA(AuxIVAbase):
     def __init__(self, algorithm_spatial='IP', reference_id=0, callbacks=None, apply_projection_back=True, recordable_loss=True, eps=EPS, threshold=THRESHOLD):
         super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
-    
+
     def __call__(self, input, iteration=100, **kwargs):
         """
         Args:
@@ -636,24 +648,24 @@ class AuxGaussIVA(AuxIVAbase):
         if self.recordable_loss:
             loss = self.compute_negative_loglikelihood()
             self.loss.append(loss)
-        
+
         if self.callbacks is not None:
-            if self.algorithm_spatial == 'ISS':
+            if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
                 # In `update_once()`, demix_filter isn't updated
                 # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                 X, Y = self.input, self.estimation
                 self.demix_filter = self.compute_demix_filter(Y, X)
-            
+
             for callback in self.callbacks:
                 callback(self)
-            
-            if self.algorithm_spatial == 'ISS':
+
+            if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
                 self.demix_filter = None
 
         for idx in range(iteration):
-            if self.algorithm_spatial in ['pairwise', 'IP2']:
+            if self.algorithm_spatial in ['pairwise', 'IP2', 'ISS2']:
                 self._select_update_pair()
-            
+
             self.update_once()
 
             if self.recordable_loss:
@@ -661,33 +673,33 @@ class AuxGaussIVA(AuxIVAbase):
                 self.loss.append(loss)
 
             if self.callbacks is not None:
-                if self.algorithm_spatial == 'ISS':
+                if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
                     # In `update_once()`, demix_filter isn't updated
                     # because we don't have to compute demixing filter explicitly by AuxIVA-ISS.
                     X, Y = self.input, self.estimation
                     self.demix_filter = self.compute_demix_filter(Y, X)
-                
+
                 for callback in self.callbacks:
                     callback(self)
-                
-                if self.algorithm_spatial == 'ISS':
+
+                if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
                     self.demix_filter = None
 
         reference_id = self.reference_id
 
-        if self.algorithm_spatial == 'ISS':
+        if self.algorithm_spatial in ['ISS', 'ISS1', 'ISS2']:
             X, Y = self.input, self.estimation
             self.demix_filter = self.compute_demix_filter(Y, X)
         else:
             X, W = input, self.demix_filter
             Y = self.separate(X, demix_filter=W)
-        
+
         output = Y
 
         if self.apply_projection_back:
             scale = projection_back(output, reference=X[reference_id])
             output = output * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
-        
+
         self.estimation = output
 
         return output
@@ -698,19 +710,21 @@ class AuxGaussIVA(AuxIVAbase):
         s += ")"
 
         return s.format(**self.__dict__)
-    
+
     def update_once(self):
         if self.algorithm_spatial in ['IP', 'IP1']:
             self.update_once_ip()
-        elif self.algorithm_spatial == 'ISS':
+        elif self.algorithm_spatial in ['ISS', 'ISS1']:
             self.update_once_iss()
-        elif self.algorithm_spatial in ['pairwise', 'IP2']:
-            self.update_once_pairwise()
         elif self.algorithm_spatial == 'IPA':
             self.update_once_ipa()
+        elif self.algorithm_spatial in ['pairwise', 'IP2']:
+            self.update_once_ip2()
+        elif self.algorithm_spatial == 'ISS2':
+            self.update_once_iss2()
         else:
             raise ValueError("Not support {} based spatial updates.".format(self.algorithm_spatial))
-    
+
     def update_once_ip(self):
         n_sources, n_channels = self.n_sources, self.n_channels
         n_bins = self.n_bins
@@ -747,14 +761,14 @@ class AuxGaussIVA(AuxIVAbase):
             w_n_Hermite = np.where(condition, w_n.conj() / denominator, w_n_Hermite)
             # if condition number is too big, `denominator[denominator < eps] = eps` may occur divergence of cost function.
             W[:, n, :] = w_n_Hermite
-        
+
         self.demix_filter = W
 
         X = self.input
         Y = self.separate(X, demix_filter=W)
-        
+
         self.estimation = Y
-    
+
     def update_once_iss(self):
         n_sources = self.n_sources
         eps = self.eps
@@ -771,13 +785,16 @@ class AuxGaussIVA(AuxIVAbase):
             V_n = U_n / D_n # (n_sources, n_bins)
             V_n[n] = 1 - 1 / np.sqrt(D_n[n])
             Y = Y - V_n[:, :, np.newaxis] * Y[n]
-        
+
         self.estimation = Y
-    
-    def update_once_pairwise(self):
-        raise NotImplementedError("In progress...")
-    
+
     def update_once_ipa(self):
+        raise NotImplementedError("In progress...")
+
+    def update_once_ip2(self):
+        raise NotImplementedError("In progress...")
+
+    def update_once_iss2(self):
         raise NotImplementedError("In progress...")
 
     def compute_negative_loglikelihood(self):
@@ -789,7 +806,7 @@ class AuxGaussIVA(AuxIVAbase):
         else:
             W = self.demix_filter
             Y = self.separate(X, demix_filter=W)
-        
+
         n_bins, n_frames = self.n_bins, self.n_frames
         eps = self.eps
 
@@ -810,7 +827,7 @@ class SparseAuxIVA(AuxIVAbase):
         super().__init__(algorithm_spatial=algorithm_spatial, reference_id=reference_id, callbacks=callbacks, apply_projection_back=apply_projection_back, recordable_loss=recordable_loss, eps=eps, threshold=threshold)
 
         raise NotImplementedError("in progress")
-    
+
     def update_once(self):
         raise NotImplementedError("in progress...")
 
@@ -834,7 +851,7 @@ class ProxLaplaceIVA(PDSBSSbase):
 
         self.reference_id = reference_id
         self.apply_projection_back = apply_projection_back
-    
+
     def __call__(self, input, iteration, **kwargs):
         """
         Args:
@@ -852,18 +869,18 @@ class ProxLaplaceIVA(PDSBSSbase):
         if self.apply_projection_back:
             scale = projection_back(output, reference=X[reference_id])
             output = output * scale[..., np.newaxis] # (n_sources, n_bins, n_frames)
-        
+
         self.estimation = output
 
         return output
-    
+
     def __repr__(self):
         s = "ProxLaplaceIVA("
         s += "algorithm_spatial={algorithm_spatial}"
         s += ")"
 
         return s.format(**self.__dict__)
-    
+
     def prox_penalty(self, z, mu=1, is_sparse=True):
         """
         Args:
@@ -887,7 +904,7 @@ class ProxLaplaceIVA(PDSBSSbase):
         z_tilde = sci_sparse.lil_matrix(z_tilde)
 
         return z_tilde
-    
+
     def compute_penalty(self):
         """
         Returns:
@@ -896,11 +913,11 @@ class ProxLaplaceIVA(PDSBSSbase):
         C = self.regularizer
         X, W = self.input, self.demix_filter
         Y = self.separate(X, demix_filter=W)
-        
+
         loss = np.sum(np.abs(Y)**2, axis=1) # (n_sources, n_frames)
         loss = np.sqrt(loss) # (n_sources, n_frames)
         loss = C * loss.sum(axis=(0, 1))
-        
+
         return loss
 
 class SparseProxIVA(PDSBSSbase):
@@ -943,16 +960,16 @@ def _convolve_mird(titles, reverb=0.160, degrees=[0], mic_intervals=[8,8,8,8,8,8
 
             source, sr = read_wav("data/single-channel/{}.wav".format(title))
             _mixture = _mixture + np.convolve(source[:T_min], rir[:, mic_idx])
-        
+
         mixed_signals.append(_mixture)
-    
+
     mixed_signals = np.array(mixed_signals)
 
     return mixed_signals
 
 def _test_aux_iva(method='AuxLaplaceIVA'):
     np.random.seed(111)
-    
+
     # Room impulse response
     sr = 16000
     reverb = 0.16
@@ -965,9 +982,9 @@ def _test_aux_iva(method='AuxLaplaceIVA'):
     # titles = ['sample-song/sample2_source1', 'sample-song/sample2_source2']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-    
+
     n_channels, T = mixed_signal.shape
-    
+
     # STFT
     fft_size, hop_size = 2048, 1024
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
@@ -994,7 +1011,7 @@ def _test_aux_iva(method='AuxLaplaceIVA'):
     estimation = iva(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
-    
+
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
     for idx in range(n_sources):
@@ -1010,7 +1027,7 @@ def _test_aux_iva(method='AuxLaplaceIVA'):
 
 def _test_grad_iva(method='GradLaplaceIVA'):
     np.random.seed(111)
-    
+
     # Room impulse response
     sr = 16000
     reverb = 0.16
@@ -1022,9 +1039,9 @@ def _test_grad_iva(method='GradLaplaceIVA'):
     titles = ['man-16000', 'woman-16000']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-    
+
     n_channels, T = mixed_signal.shape
-    
+
     # STFT
     fft_size, hop_size = 2048, 1024
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
@@ -1047,7 +1064,7 @@ def _test_grad_iva(method='GradLaplaceIVA'):
     estimation = iva(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
-    
+
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
     for idx in range(n_sources):
@@ -1066,7 +1083,7 @@ def _test_over_iva(method='OverAuxLaplaceIVA'):
     from algorithm.projection_back import projection_back
 
     np.random.seed(111)
-    
+
     # Room impulse response
     sr = 16000
     reverb = 0.16
@@ -1078,9 +1095,9 @@ def _test_over_iva(method='OverAuxLaplaceIVA'):
     titles = ['sample-song/sample3_source2', 'sample-song/sample3_source3']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-    
+
     n_channels, T = mixed_signal.shape
-    
+
     # STFT
     fft_size, hop_size = 2048, 1024
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
@@ -1106,7 +1123,7 @@ def _test_over_iva(method='OverAuxLaplaceIVA'):
         raise ValueError("Not support method {}".format(method))
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
-    
+
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
     for idx in range(n_sources):
@@ -1122,7 +1139,7 @@ def _test_over_iva(method='OverAuxLaplaceIVA'):
 
 def _test_prox_iva(method='ProxLaplaceIVA'):
     np.random.seed(111)
-    
+
     # Room impulse response
     sr = 16000
     reverb = 0.16
@@ -1134,9 +1151,9 @@ def _test_prox_iva(method='ProxLaplaceIVA'):
     titles = ['man-16000', 'woman-16000']
 
     mixed_signal = _convolve_mird(titles, reverb=reverb, degrees=degrees, mic_intervals=mic_intervals, mic_indices=mic_indices, samples=samples)
-    
+
     n_channels, T = mixed_signal.shape
-    
+
     # STFT
     fft_size, hop_size = 2048, 1024
     mixture = stft(mixed_signal, fft_size=fft_size, hop_size=hop_size)
@@ -1155,7 +1172,7 @@ def _test_prox_iva(method='ProxLaplaceIVA'):
     estimation = iva(mixture, iteration=iteration)
 
     estimated_signal = istft(estimation, fft_size=fft_size, hop_size=hop_size, length=T)
-    
+
     print("Mixture: {}, Estimation: {}".format(mixed_signal.shape, estimated_signal.shape))
 
     for idx in range(n_sources):
@@ -1220,7 +1237,7 @@ if __name__ == '__main__':
     print("="*10, "NaturalGradLaplaceIVA", "="*10)
     _test_grad_iva(method='NaturalGradLaplaceIVA')
     print()
-    
+
     print("="*10, "AuxIVA-IP", "="*10)
     print("-"*10, "AuxLaplaceIVA-IP", "-"*10)
     _test_aux_iva(method='AuxLaplaceIVA-IP')
@@ -1246,7 +1263,7 @@ if __name__ == '__main__':
     _test_aux_iva(method='AuxGaussIVA-IPA')
     print()
     """
-    
+
     print("-"*10, "PCA+IVA", "-"*10)
     _test_over_iva(method='PCA+IVA')
     print()
@@ -1254,7 +1271,7 @@ if __name__ == '__main__':
     print("-"*10, "OverIVA", "-"*10)
     _test_over_iva(method='OverIVA')
     print()
-    
+
     print("="*10, "ProxIVA", "="*10)
     print("-"*10, "ProxLaplaceIVA", "-"*10)
     _test_prox_iva(method='ProxLaplaceIVA')
