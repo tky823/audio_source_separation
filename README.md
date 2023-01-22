@@ -1,6 +1,11 @@
 # audio_source_separation
 An implementation of audio source separation tools.
 
+## <span style="color: red; ">FYI</span>
+**Most BSS methods implemented in this repository have been moved to [ssspy](https://github.com/tky823/ssspy).**
+**You can install `ssspy` by `pip` via `GitHub`.**
+
+
 ## Nonnegative Matrix Factorization
 | Method | References | Example |
 |:-:|:-:|:-:|
