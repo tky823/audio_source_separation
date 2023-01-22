@@ -1,6 +1,10 @@
 # audio_source_separation
 音源分離ツールの実装
 
+## <span style="color: red; ">FYI</span>
+**このレポジトリの多くのブラインド音源分離手法は，[ssspy](https://github.com/tky823/ssspy)に移されました:rocket:．**
+**`ssspy`は`GitHub`経由で，`pip`によりインストール可能です．**
+
 ## 非負値行列因子分解
 | 手法 | 参考文献 | 例 |
 |:-:|:-:|:-:|
