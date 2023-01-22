@@ -2,7 +2,7 @@
 An implementation of audio source separation tools.
 
 ## <span style="color: red; ">FYI</span>
-**Most BSS methods implemented in this repository have been moved to [ssspy](https://github.com/tky823/ssspy):rocket:**
+**Most BSS methods implemented in this repository have been moved to [ssspy](https://github.com/tky823/ssspy):rocket:.**
 **You can install `ssspy` by `pip` via `GitHub`.**
 
 
